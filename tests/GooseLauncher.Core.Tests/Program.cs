@@ -39,7 +39,9 @@ if (failures.Count == 0 && args.Contains("--integration", StringComparer.Ordinal
             var files = filesIndex < 0
                 ? []
                 : args.Skip(filesIndex + 1).TakeWhile(value => !value.StartsWith("--", StringComparison.Ordinal)).ToArray();
-            await client.PromptAsync("Reply with exactly: Goose Launcher ACP OK", files, timeout.Token);
+            var promptCompletion = await client.StartPromptAsync("Reply with exactly: Goose Launcher ACP OK", files, timeout.Token);
+            Console.WriteLine("PASS Goose ACP session/prompt request written");
+            await promptCompletion;
             if (response.Length == 0) throw new Exception("Goose completed session/prompt without an agent_message_chunk.");
             var responseText = response.ToString().Trim();
             if (responseText.StartsWith("Ran into this error:", StringComparison.OrdinalIgnoreCase))

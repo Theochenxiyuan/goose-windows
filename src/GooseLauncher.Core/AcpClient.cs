@@ -50,6 +50,12 @@ public sealed class AcpClient : IAsyncDisposable
 
     public async Task PromptAsync(string text, IReadOnlyList<string> files, CancellationToken cancellationToken = default)
     {
+        var completion = await StartPromptAsync(text, files, cancellationToken);
+        await completion;
+    }
+
+    public async Task<Task> StartPromptAsync(string text, IReadOnlyList<string> files, CancellationToken cancellationToken = default)
+    {
         if (SessionId is null) throw new InvalidOperationException("Create a session before prompting.");
         var prompt = new List<object> { new { type = "text", text = BuildPromptText(text, files) } };
         foreach (var file in files)
@@ -66,8 +72,11 @@ public sealed class AcpClient : IAsyncDisposable
                 size = fileLength
             });
         }
-        await RequestAsync("session/prompt", new { sessionId = SessionId, prompt }, cancellationToken);
+        var response = await StartRequestAsync("session/prompt", new { sessionId = SessionId, prompt }, cancellationToken);
+        return AwaitPromptAsync(response);
     }
+
+    private static async Task AwaitPromptAsync(Task<JsonElement> response) => await response;
 
     internal static string BuildPromptText(string text, IReadOnlyList<string> files)
     {
@@ -100,12 +109,34 @@ public sealed class AcpClient : IAsyncDisposable
 
     private async Task<JsonElement> RequestAsync(string method, object parameters, CancellationToken cancellationToken)
     {
+        var response = await StartRequestAsync(method, parameters, cancellationToken);
+        return await response.ConfigureAwait(false);
+    }
+
+    private async Task<Task<JsonElement>> StartRequestAsync(string method, object parameters, CancellationToken cancellationToken)
+    {
         var id = Interlocked.Increment(ref _nextId);
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_pending.TryAdd(id, completion)) throw new InvalidOperationException("Duplicate ACP request id.");
         try
         {
             await WriteAsync(new { jsonrpc = "2.0", id, method, @params = parameters }, cancellationToken);
+            return AwaitResponseAsync(id, completion, cancellationToken);
+        }
+        catch
+        {
+            _pending.TryRemove(id, out _);
+            throw;
+        }
+    }
+
+    private async Task<JsonElement> AwaitResponseAsync(
+        long id,
+        TaskCompletionSource<JsonElement> completion,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
             using var registration = cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
             return await completion.Task.ConfigureAwait(false);
         }
