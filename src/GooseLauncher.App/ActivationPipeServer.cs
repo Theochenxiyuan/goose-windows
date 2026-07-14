@@ -33,7 +33,7 @@ internal sealed class ActivationPipeServer : IAsyncDisposable
         {
             try
             {
-                await using var pipe = new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                await using var pipe = new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Message, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await pipe.WaitForConnectionAsync(cancellationToken);
                 var request = await ReadAsync(pipe, cancellationToken);
                 ActivationReceived?.Invoke(request);

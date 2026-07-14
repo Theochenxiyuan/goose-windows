@@ -51,7 +51,6 @@ public partial class App : Application
         _pipeServer.Start();
 
         _tray = new SystemTrayIcon();
-        _tray.NewTaskRequested += () => _overlay.DispatcherQueue.TryEnqueue(_overlay.ShowCurrent);
         _tray.OpenGooseRequested += OpenGooseFromTray;
         _tray.SettingsRequested += () => ShowSettings(_overlay.AppWindow);
         _tray.ExitRequested += ExitApp;

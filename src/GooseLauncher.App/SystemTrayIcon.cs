@@ -18,8 +18,6 @@ internal sealed class SystemTrayIcon : IDisposable
     private const uint WindowTimer = 0x0113;
     private const uint WindowNull = 0;
     private const nuint RetryTimerId = 1;
-    private const uint MouseLeftButtonUp = 0x0202;
-    private const uint MouseLeftButtonDoubleClick = 0x0203;
     private const uint MouseRightButtonUp = 0x0205;
     private const uint ContextMenu = 0x007B;
     private const uint MenuString = 0;
@@ -27,7 +25,6 @@ internal sealed class SystemTrayIcon : IDisposable
     private const uint TrackRightButton = 0x0002;
     private const uint TrackReturnCommand = 0x0100;
     private const uint TrackNoNotify = 0x0080;
-    private const uint MenuNewTask = 1001;
     private const uint MenuOpenGoose = 1002;
     private const uint MenuSettings = 1003;
     private const uint MenuExit = 1004;
@@ -42,7 +39,6 @@ internal sealed class SystemTrayIcon : IDisposable
     private bool _busy;
     private bool _disposed;
 
-    internal event Action? NewTaskRequested;
     internal event Action? OpenGooseRequested;
     internal event Action? SettingsRequested;
     internal event Action? ExitRequested;
@@ -149,9 +145,7 @@ internal sealed class SystemTrayIcon : IDisposable
             if (message == TrayCallbackMessage)
             {
                 var mouseMessage = (uint)(lParam.ToInt64() & 0xFFFF);
-                if (mouseMessage is MouseLeftButtonUp or MouseLeftButtonDoubleClick)
-                    NewTaskRequested?.Invoke();
-                else if (mouseMessage is MouseRightButtonUp or ContextMenu)
+                if (mouseMessage is MouseRightButtonUp or ContextMenu)
                     ShowContextMenu();
                 return nint.Zero;
             }
@@ -167,12 +161,11 @@ internal sealed class SystemTrayIcon : IDisposable
         if (menu == nint.Zero) return;
         try
         {
-            AppendMenu(menu, MenuString, MenuNewTask, Strings.Get("新建任务", "New task"));
-            AppendMenu(menu, MenuString, MenuOpenGoose, Strings.Get("打开 Goose", "Open Goose"));
+            AppendMenu(menu, MenuString, MenuOpenGoose, Strings.Get("打开 Goose Desktop", "Open Goose Desktop"));
             AppendMenu(menu, MenuString, MenuSettings, Strings.Get("设置", "Settings"));
             AppendMenu(menu, MenuSeparator, 0, null);
             AppendMenu(menu, MenuString, MenuExit, Strings.Get("退出", "Exit"));
-            SetMenuDefaultItem(menu, MenuNewTask, false);
+            SetMenuDefaultItem(menu, MenuOpenGoose, false);
             GetCursorPos(out var cursor);
             SetForegroundWindow(_windowHandle);
             var command = TrackPopupMenuEx(menu, TrackRightButton | TrackReturnCommand | TrackNoNotify,
@@ -180,7 +173,6 @@ internal sealed class SystemTrayIcon : IDisposable
             PostMessage(_windowHandle, WindowNull, nint.Zero, nint.Zero);
             switch (command)
             {
-                case MenuNewTask: NewTaskRequested?.Invoke(); break;
                 case MenuOpenGoose: OpenGooseRequested?.Invoke(); break;
                 case MenuSettings: SettingsRequested?.Invoke(); break;
                 case MenuExit: ExitRequested?.Invoke(); break;

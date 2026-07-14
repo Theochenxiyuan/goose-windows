@@ -92,8 +92,6 @@ public sealed partial class OverlayWindow : Window
         DispatcherQueue.TryEnqueue(() => PromptTextBox.Focus(FocusState.Programmatic));
     }
 
-    internal void ShowCurrent() => ShowActivation(_activation with { X = null, Y = null });
-
     private async void Run_Click(object sender, RoutedEventArgs e) => await RunAsync();
 
     private async Task RunAsync()

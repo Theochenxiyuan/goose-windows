@@ -80,7 +80,11 @@
         </Border>
       </StackPanel>
 
-      <StackPanel Grid.Row="1" Spacing="8">
+      <Grid Grid.Row="1" RowSpacing="8">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
         <TextBox
             x:Name="PromptTextBox"
             MinHeight="82"
@@ -88,6 +92,10 @@
             VerticalAlignment="Stretch"
             AcceptsReturn="True"
             TextWrapping="Wrap"
+            ScrollViewer.VerticalScrollMode="Auto"
+            ScrollViewer.VerticalScrollBarVisibility="Auto"
+            ScrollViewer.HorizontalScrollMode="Disabled"
+            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
             AutomationProperties.Name="Task prompt"
             PlaceholderText="Tell Goose what to do…"
             TextChanged="PromptTextBox_TextChanged"
@@ -95,10 +103,11 @@
             KeyDown="PromptTextBox_KeyDown" />
         <InfoBar
             x:Name="ErrorInfoBar"
+            Grid.Row="1"
             IsOpen="False"
             IsClosable="False"
             Severity="Error" />
-      </StackPanel>
+      </Grid>
 
       <Border
           x:Name="PermissionPanel"
