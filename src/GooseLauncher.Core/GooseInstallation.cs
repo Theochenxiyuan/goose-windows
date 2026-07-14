@@ -64,6 +64,20 @@ public sealed record GooseInstallation(string CliPath, string? DesktopPath)
         StandardErrorEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
     };
 
+    public ProcessStartInfo CreateInteractiveRunStartInfo(string cwd, string prompt)
+    {
+        var startInfo = new ProcessStartInfo(CliPath)
+        {
+            UseShellExecute = true,
+            WorkingDirectory = Path.GetFullPath(cwd),
+        };
+        startInfo.ArgumentList.Add("run");
+        startInfo.ArgumentList.Add("--text");
+        startInfo.ArgumentList.Add(prompt);
+        startInfo.ArgumentList.Add("--interactive");
+        return startInfo;
+    }
+
     private static string? FindOnPath(string name)
     {
         foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))

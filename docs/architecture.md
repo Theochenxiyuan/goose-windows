@@ -4,7 +4,7 @@
 
 1. **Explorer activation**: packaged `IExplorerCommand` resolves a directory, directory background, or up to eight files with one shared parent. It captures the pointer position, attempts the current-user named pipe, then uses `goosecompanion://show` for cold start.
 2. **Companion shell**: one resident WinUI 3 process owns a notification-area icon, a pre-created input overlay, protocol parsing, and the pipe listener. Overlay close/Esc only hides the window; tray Exit owns application shutdown.
-3. **Run targets**: Desktop mode uses the ACP bridge to create and run a durable Goose session before opening it in Goose Desktop. Terminal mode launches `goose run --text ... --interactive` in Windows Terminal with the same cwd and selected-file context.
+3. **Run targets**: Desktop mode uses the ACP bridge to create and run a durable Goose session before opening it in Goose Desktop. Terminal mode launches `goose run --text ... --interactive` directly with the same cwd and selected-file context, leaving presentation to the configured default Windows terminal.
 4. **Goose Desktop**: remains the owner of providers, credentials, extensions, policy, persistent conversations, and full UI.
 
 ## Deliberate boundaries

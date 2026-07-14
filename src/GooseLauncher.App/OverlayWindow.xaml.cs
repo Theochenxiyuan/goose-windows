@@ -21,7 +21,13 @@ public sealed partial class OverlayWindow : Window
     private const int ExtendedStyleIndex = -20;
     private const long ExtendedStyleToolWindow = 0x00000080L;
     private const long ExtendedStyleAppWindow = 0x00040000L;
+    private const long ExtendedStyleTopmost = 0x00000008L;
+    private const uint SetWindowPositionNoSize = 0x0001;
+    private const uint SetWindowPositionNoMove = 0x0002;
+    private const uint SetWindowPositionShowWindow = 0x0040;
+    private static readonly nint WindowTopmost = new(-1);
 
+    private readonly nint _windowHandle;
     private ActivationRequest _activation = ActivationRequest.Create(Environment.CurrentDirectory);
     private AcpClient? _client;
     private bool _running;
@@ -40,8 +46,8 @@ public sealed partial class OverlayWindow : Window
         InitializeComponent();
         ApplyStrings();
 
-        var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        _currentDpi = GetDpiForWindow(windowHandle);
+        _windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        _currentDpi = GetDpiForWindow(_windowHandle);
         AppWindow.Resize(new Windows.Graphics.SizeInt32(Scale(DefaultWidth, _currentDpi), Scale(DefaultHeight, _currentDpi)));
 
         if (AppWindow.Presenter is OverlappedPresenter presenter)
@@ -61,7 +67,7 @@ public sealed partial class OverlayWindow : Window
             _ = HideOverlayAsync();
         };
 
-        ApplyToolWindowStyle(windowHandle);
+        ApplyToolWindowStyle(_windowHandle);
         UpdateRunButton();
     }
 
@@ -87,8 +93,7 @@ public sealed partial class OverlayWindow : Window
         if (contextChanged) PromptTextBox.Text = string.Empty;
         SetSubmitting(false);
         PositionNearPointer(request.X, request.Y);
-        AppWindow.Show();
-        Activate();
+        ShowTopmost();
         DispatcherQueue.TryEnqueue(() => PromptTextBox.Focus(FocusState.Programmatic));
     }
 
@@ -207,8 +212,7 @@ public sealed partial class OverlayWindow : Window
                 ? Strings.Get("Goose 请求运行工具", "Goose requests permission to run a tool")
                 : request.Title;
             PermissionPanel.Visibility = Visibility.Visible;
-            AppWindow.Show();
-            Activate();
+            ShowTopmost();
             AllowButton.Focus(FocusState.Programmatic);
         }))
         {
@@ -380,6 +384,22 @@ public sealed partial class OverlayWindow : Window
             Math.Clamp(point.Y + offset, workArea.Y, maximumTop)));
     }
 
+    private void ShowTopmost()
+    {
+        if (AppWindow.Presenter is OverlappedPresenter presenter)
+            presenter.IsAlwaysOnTop = true;
+        AppWindow.Show();
+        Activate();
+        SetWindowPos(
+            _windowHandle,
+            WindowTopmost,
+            0,
+            0,
+            0,
+            0,
+            SetWindowPositionNoSize | SetWindowPositionNoMove | SetWindowPositionShowWindow);
+    }
+
     private void ApplyStrings()
     {
         HeaderTitleText.Text = Strings.Get("在此位置使用 Goose", "Run Goose here");
@@ -459,7 +479,7 @@ public sealed partial class OverlayWindow : Window
     private static void ApplyToolWindowStyle(nint windowHandle)
     {
         var style = GetWindowLongPtr(windowHandle, ExtendedStyleIndex).ToInt64();
-        style = (style | ExtendedStyleToolWindow) & ~ExtendedStyleAppWindow;
+        style = (style | ExtendedStyleToolWindow | ExtendedStyleTopmost) & ~ExtendedStyleAppWindow;
         SetWindowLongPtr(windowHandle, ExtendedStyleIndex, new nint(style));
     }
 
@@ -475,6 +495,10 @@ public sealed partial class OverlayWindow : Window
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
     private static extern nint SetWindowLongPtr(nint window, int index, nint newValue);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
 
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(nint window);

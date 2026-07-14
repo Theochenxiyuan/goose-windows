@@ -12,7 +12,8 @@ var tests = new (string Name, Action Run)[]
     ("Goose locator honors explicit CLI path", LocatesExplicitCli),
     ("Goose locator honors Companion path overrides", LocatesCompanionOverrides),
     ("Goose locator pairs a Desktop override with its bundled CLI", PairsDesktopOverrideWithBundledCli),
-    ("Goose locator rejects a missing CLI override", RejectsMissingCliOverride)
+    ("Goose locator rejects a missing CLI override", RejectsMissingCliOverride),
+    ("Goose terminal launch preserves exact prompt arguments", BuildsInteractiveRunArguments)
 };
 
 var failures = new List<string>();
@@ -151,6 +152,22 @@ static void PairsDesktopOverrideWithBundledCli()
     var installation = GooseInstallation.Locate(desktopOverride: desktop) ?? throw new Exception("Desktop override was not resolved.");
     Equal(cli, installation.CliPath);
     Equal(desktop, installation.DesktopPath);
+}
+
+static void BuildsInteractiveRunArguments()
+{
+    using var workspace = TestWorkspace.Create("terminal workspace");
+    var cli = workspace.File("goose.exe");
+    const string prompt = "Inspect these exact inputs; keep the semicolon.\r\n1. C:\\example path\\ui.png";
+    var startInfo = new GooseInstallation(cli, null).CreateInteractiveRunStartInfo(workspace.Path, prompt);
+    Equal(cli, startInfo.FileName);
+    Equal(Path.GetFullPath(workspace.Path), startInfo.WorkingDirectory);
+    Equal(true, startInfo.UseShellExecute);
+    Equal(4, startInfo.ArgumentList.Count);
+    Equal("run", startInfo.ArgumentList[0]);
+    Equal("--text", startInfo.ArgumentList[1]);
+    Equal(prompt, startInfo.ArgumentList[2]);
+    Equal("--interactive", startInfo.ArgumentList[3]);
 }
 
 static void Equal<T>(T expected, T actual)

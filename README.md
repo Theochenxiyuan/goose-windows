@@ -25,7 +25,7 @@ dotnet run --project .\src\GooseLauncher.App -- --folder "$PWD"
 
 The app locates Goose in `PATH`, `GOOSE_CLI_PATH`, and common Desktop install locations such as `resources\bin\goose.exe`.
 
-In **Goose Desktop** mode, the Companion creates a durable ACP session and opens it with `goose://resume/<sessionId>`. In **Terminal** mode, it starts `goose run --text <prompt> --interactive` in Windows Terminal with the selected working directory. Both modes include the exact selected file paths in the task context.
+In **Goose Desktop** mode, the Companion creates a durable ACP session and opens it with `goose://resume/<sessionId>`. In **Terminal** mode, it starts `goose run --text <prompt> --interactive` directly with the selected working directory, allowing the configured default Windows terminal to host the CLI without re-parsing prompt text. Both modes include the exact selected file paths in the task context.
 
 ## ACP and Desktop hand-off
 
