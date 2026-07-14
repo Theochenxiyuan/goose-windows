@@ -1,67 +1,171 @@
-<Window x:Class="GooseLauncher.App.OverlayWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Goose Launcher" Width="600" Height="520" MinWidth="440" MinHeight="380"
-        WindowStyle="None" ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" Topmost="True"
-        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-        Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
-        PreviewKeyDown="Window_PreviewKeyDown">
-  <Border BorderThickness="1" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" Padding="18">
-    <Grid>
+<Window
+    x:Class="GooseLauncher.App.OverlayWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:primitives="using:Microsoft.UI.Xaml.Controls.Primitives"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="Ask Goose">
+
+  <Border
+      Padding="18"
+      CornerRadius="14"
+      BorderThickness="1"
+      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+      Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
+    <Grid RowSpacing="12">
       <Grid.RowDefinitions>
-        <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
         <RowDefinition Height="*" />
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
       </Grid.RowDefinitions>
 
-      <DockPanel x:Name="DragRegion" LastChildFill="True" MouseLeftButtonDown="DragRegion_MouseLeftButtonDown">
-        <Button x:Name="CloseButton" DockPanel.Dock="Right" Content="×" Width="32" MinWidth="32" Padding="2" Click="Close_Click" />
-        <StackPanel>
-          <TextBlock x:Name="TitleText" Text="Goose Launcher" FontSize="20" FontWeight="SemiBold" />
-          <TextBlock x:Name="FolderText" Margin="0,5,8,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
-        </StackPanel>
-      </DockPanel>
+      <StackPanel Spacing="7">
+        <Grid
+            x:Name="MoveRegion"
+            Background="Transparent"
+            PointerPressed="MoveRegion_PointerPressed"
+            PointerMoved="MoveRegion_PointerMoved"
+            PointerReleased="MoveRegion_PointerReleased"
+            PointerCanceled="MoveRegion_PointerCanceled"
+            PointerCaptureLost="MoveRegion_PointerCaptureLost">
+          <TextBlock
+              x:Name="HeaderTitleText"
+              IsHitTestVisible="False"
+              Text="Run Goose here"
+              FontSize="18"
+              FontWeight="SemiBold" />
+        </Grid>
 
-      <Border Grid.Row="1" Margin="0,12,0,0" Padding="10,7" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}">
-        <TextBlock x:Name="FilesText" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
-      </Border>
+        <Border
+            Padding="10,7"
+            CornerRadius="7"
+            Background="{ThemeResource ControlFillColorDefaultBrush}">
+          <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <FontIcon Glyph="&#xE8B7;" FontSize="14" VerticalAlignment="Center" />
+            <TextBlock
+                x:Name="FolderPathTextBlock"
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                TextTrimming="CharacterEllipsis"
+                ToolTipService.ToolTip="{Binding Text, ElementName=FolderPathTextBlock}" />
+          </Grid>
+        </Border>
 
-      <Grid Grid.Row="2" Margin="0,12,0,0">
-        <TextBox x:Name="PromptBox" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
-                 AutomationProperties.Name="Task prompt" SpellCheck.IsEnabled="True"
-                 TextCompositionManager.PreviewTextInputStart="PromptBox_TextInputStart"
-                 TextCompositionManager.PreviewTextInputUpdate="PromptBox_TextInputUpdate"
-                 TextCompositionManager.TextInput="PromptBox_TextInput" />
-        <Grid x:Name="RunPanel" Visibility="Collapsed">
-          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-          <TextBlock x:Name="StatusText" FontWeight="SemiBold" Text="Starting Goose…" />
-          <TextBox x:Name="OutputText" Grid.Row="1" Margin="0,8,0,0" IsReadOnly="True" TextWrapping="Wrap"
-                   VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Goose run summary" />
+        <Border
+            x:Name="FilesPanel"
+            Padding="10,7"
+            CornerRadius="7"
+            Background="{ThemeResource ControlFillColorDefaultBrush}"
+            Visibility="Collapsed">
+          <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <FontIcon Glyph="&#xE723;" FontSize="14" VerticalAlignment="Center" />
+            <TextBlock
+                x:Name="FilesTextBlock"
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                TextTrimming="CharacterEllipsis"
+                ToolTipService.ToolTip="{Binding Text, ElementName=FilesTextBlock}" />
+          </Grid>
+        </Border>
+      </StackPanel>
+
+      <Grid Grid.Row="1">
+        <TextBox
+            x:Name="PromptTextBox"
+            MinHeight="82"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
+            AcceptsReturn="True"
+            TextWrapping="Wrap"
+            AutomationProperties.Name="Task prompt"
+            PlaceholderText="Tell Goose what to do…"
+            TextChanged="PromptTextBox_TextChanged"
+            PreviewKeyDown="PromptTextBox_PreviewKeyDown"
+            KeyDown="PromptTextBox_KeyDown" />
+
+        <Grid x:Name="RunPanel" Visibility="Collapsed" RowSpacing="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <TextBlock x:Name="StatusTextBlock" FontWeight="SemiBold" Text="Connecting to Goose…" />
+          <TextBox
+              x:Name="OutputTextBox"
+              Grid.Row="1"
+              IsReadOnly="True"
+              TextWrapping="Wrap"
+              ScrollViewer.VerticalScrollBarVisibility="Auto"
+              AutomationProperties.Name="Goose run summary" />
         </Grid>
       </Grid>
 
-      <Border x:Name="PermissionPanel" Grid.Row="3" Margin="0,12,0,0" Padding="12" BorderThickness="1"
-              BorderBrush="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" Visibility="Collapsed">
-        <Grid>
-          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-          <TextBlock x:Name="PermissionText" TextWrapping="Wrap" FontWeight="SemiBold" />
-          <StackPanel Grid.Row="1" Margin="0,10,0,0" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="DenyButton" Content="Deny" Margin="0,0,8,0" Click="Deny_Click" />
-            <Button x:Name="AllowButton" Content="Allow" Click="Allow_Click" />
+      <Border
+          x:Name="PermissionPanel"
+          Grid.Row="2"
+          Padding="12"
+          CornerRadius="7"
+          BorderThickness="1"
+          BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+          Visibility="Collapsed">
+        <Grid RowSpacing="10">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <TextBlock x:Name="PermissionTextBlock" TextWrapping="Wrap" FontWeight="SemiBold" />
+          <StackPanel Grid.Row="1" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="DenyButton" Content="Deny" Click="Deny_Click" />
+            <Button x:Name="AllowButton" Content="Allow" Click="Allow_Click" Style="{StaticResource AccentButtonStyle}" />
           </StackPanel>
         </Grid>
       </Border>
 
-      <Grid Grid.Row="4" Margin="0,14,0,0">
-        <TextBlock x:Name="HintText" VerticalAlignment="Center" Opacity="0.65" Text="Enter to run · Shift/Ctrl+Enter for newline · Esc to close" />
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-          <Button x:Name="ConfigureGooseButton" Content="Configure in Goose" Margin="0,0,8,0" Visibility="Collapsed" Click="ConfigureGoose_Click" />
-          <Button x:Name="OpenGooseButton" Content="Open Goose" Margin="0,0,8,0" Visibility="Collapsed" Click="OpenGoose_Click" />
-          <Button x:Name="CancelButton" Content="Cancel" Margin="0,0,8,0" Visibility="Collapsed" Click="CancelRun_Click" />
-          <Button x:Name="RunButton" Content="Run" Background="{StaticResource AccentBrush}" Foreground="White" Click="Run_Click" />
-        </StackPanel>
+      <Grid Grid.Row="3" RowSpacing="8">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock
+            x:Name="HintTextBlock"
+            Opacity="0.62"
+            Text="Enter to run · Shift/Ctrl+Enter for newline · Esc to close" />
+        <Grid Grid.Row="1" ColumnSpacing="8">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="24" />
+          </Grid.ColumnDefinitions>
+          <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="CloseButton" Content="Close" Click="Close_Click" />
+            <Button x:Name="ConfigureGooseButton" Content="Configure in Goose" Visibility="Collapsed" Click="ConfigureGoose_Click" />
+            <Button x:Name="OpenGooseButton" Content="Open in Goose" Visibility="Collapsed" Click="OpenGoose_Click" />
+            <Button x:Name="CancelRunButton" Content="Cancel" Visibility="Collapsed" Click="CancelRun_Click" />
+            <Button x:Name="RunButton" Content="Run" Click="Run_Click" Style="{StaticResource AccentButtonStyle}" />
+          </StackPanel>
+          <Grid Grid.Column="1" Width="24" Height="24" VerticalAlignment="Bottom">
+            <TextBlock
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                FontSize="14"
+                Opacity="0.5"
+                Text="◢"
+                IsHitTestVisible="False" />
+            <primitives:Thumb
+                x:Name="ResizeThumb"
+                AutomationProperties.Name="Resize window"
+                DragDelta="ResizeThumb_DragDelta" />
+          </Grid>
+        </Grid>
       </Grid>
     </Grid>
   </Border>

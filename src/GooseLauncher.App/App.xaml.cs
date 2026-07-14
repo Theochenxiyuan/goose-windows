@@ -1,42 +1,55 @@
 using System.Security.Principal;
-using System.Windows;
 using GooseLauncher.Core;
+using Microsoft.UI.Xaml;
 
 namespace GooseLauncher.App;
 
-public partial class App : System.Windows.Application
+public partial class App : Application
 {
+    internal static App? Instance { get; private set; }
+
     private Mutex? _singleInstance;
     private ActivationPipeServer? _pipeServer;
     private OverlayWindow? _overlay;
     private bool _exiting;
 
-    protected override async void OnStartup(StartupEventArgs e)
+    public App()
     {
-        base.OnStartup(e);
-        // WPF's font cache still reads the legacy %windir% variable. Some launchers
-        // only preserve %SystemRoot%, so restore the standard alias before a Window
-        // type is initialized.
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("windir")))
-            Environment.SetEnvironmentVariable("windir", Environment.GetEnvironmentVariable("SystemRoot"), EnvironmentVariableTarget.Process);
-        var request = ParseActivation(e.Args);
+        Instance = this;
+        InitializeComponent();
+    }
+
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        var request = ParseActivation(Program.CommandLineArgs);
         var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
         _singleInstance = new Mutex(true, $"Local\\GooseLauncher.{sid}", out var firstInstance);
         if (!firstInstance)
         {
-            if (request is not null) await ActivationPipeServer.TrySendAsync(request, TimeSpan.FromSeconds(3));
-            Shutdown();
+            if (request is not null)
+                _ = RedirectAndExitAsync(request);
+            else
+                Exit();
             return;
         }
 
         _overlay = new OverlayWindow();
         _overlay.ExitRequested += ExitApp;
+
         _pipeServer = new ActivationPipeServer();
-        _pipeServer.ActivationReceived += activation => Dispatcher.Invoke(() => _overlay.ShowActivation(activation));
-        _pipeServer.DiagnosticReceived += message => _overlay.SetDiagnostic(message);
+        _pipeServer.ActivationReceived += activation =>
+            _overlay.DispatcherQueue.TryEnqueue(() => _overlay.ShowActivation(activation));
+        _pipeServer.DiagnosticReceived += message =>
+            _overlay.DispatcherQueue.TryEnqueue(() => _overlay.SetDiagnostic(message));
         _pipeServer.Start();
 
         _overlay.ShowActivation(request ?? ActivationRequest.Create(Environment.CurrentDirectory));
+    }
+
+    private async Task RedirectAndExitAsync(ActivationRequest request)
+    {
+        await ActivationPipeServer.TrySendAsync(request, TimeSpan.FromSeconds(3));
+        Exit();
     }
 
     private static ActivationRequest? ParseActivation(string[] args)
@@ -45,6 +58,7 @@ public partial class App : System.Windows.Application
         {
             var uriText = args.FirstOrDefault(value => value.StartsWith("goosecompanion:", StringComparison.OrdinalIgnoreCase));
             if (uriText is not null) return ActivationRequest.FromProtocolUri(new Uri(uriText));
+
             var folderIndex = Array.FindIndex(args, value => value.Equals("--folder", StringComparison.OrdinalIgnoreCase));
             if (folderIndex >= 0 && folderIndex + 1 < args.Length)
             {
@@ -53,10 +67,12 @@ public partial class App : System.Windows.Application
                 return ActivationRequest.Create(args[folderIndex + 1], files: files);
             }
         }
-        catch (Exception error)
+        catch
         {
-            System.Windows.MessageBox.Show(error.Message, "Goose Launcher", MessageBoxButton.OK, MessageBoxImage.Warning);
+            // Invalid external activations fall back to the current directory. The
+            // overlay remains usable and does not expose a second diagnostics UI.
         }
+
         return null;
     }
 
@@ -64,11 +80,13 @@ public partial class App : System.Windows.Application
     {
         if (_exiting) return;
         _exiting = true;
+
         if (_pipeServer is not null) await _pipeServer.DisposeAsync();
         if (_overlay is not null) await _overlay.DisposeSessionAsync();
+
         _singleInstance?.ReleaseMutex();
         _singleInstance?.Dispose();
         _overlay?.CloseForExit();
-        Shutdown();
+        Exit();
     }
 }

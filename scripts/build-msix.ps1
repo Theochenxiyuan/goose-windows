@@ -13,6 +13,7 @@ $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $artifactRoot = Join-Path $repoRoot 'artifacts\msix'
 $publishDir = Join-Path $artifactRoot 'publish'
 $stageDir = Join-Path $artifactRoot 'stage'
+$priInputDir = Join-Path $artifactRoot 'pri-input'
 $manifestTemplatePath = Join-Path $repoRoot 'packaging\Package.appxmanifest.template'
 $manifestTemplate = Get-Content -LiteralPath $manifestTemplatePath -Raw -Encoding UTF8
 $versionMatch = [Regex]::Match($manifestTemplate, '<Identity\b[^>]*\bVersion="([0-9]+(?:\.[0-9]+){3})"')
@@ -73,6 +74,7 @@ function New-PngIcon([string]$PngPath, [string]$IconPath, [int]$Size) {
 
 Reset-Directory $publishDir
 Reset-Directory $stageDir
+Reset-Directory $priInputDir
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio Build Tools with MSVC v143 are required to build the Explorer command.' }
@@ -85,7 +87,8 @@ Invoke-Checked $msbuild @(
 )
 Invoke-Checked 'dotnet' @(
     'publish', (Join-Path $repoRoot 'src\GooseLauncher.App\GooseLauncher.App.csproj'),
-    '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-o', $publishDir
+    '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
+    '-p:WindowsAppSDKSelfContained=true', '-p:GooseLauncherPackaged=true', '-o', $publishDir
 )
 Copy-Item -Path (Join-Path $publishDir '*') -Destination $stageDir -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'src\GooseLauncher.ShellExtension\x64\Release\GooseLauncher.ShellExtension.dll') -Destination $stageDir -Force
@@ -97,6 +100,26 @@ New-Logo (Join-Path $assets 'Square44x44Logo.png') 44
 New-PngIcon (Join-Path $assets 'Square44x44Logo.png') (Join-Path $assets 'GooseLauncher.ico') 44
 New-Logo (Join-Path $assets 'Square150x150Logo.png') 150
 New-Logo (Join-Path $assets 'StoreLogo.png') 50
+foreach ($scale in @(125, 150, 200, 400)) {
+    New-Logo (Join-Path $assets "Square44x44Logo.scale-$scale.png") ([Math]::Round(44 * $scale / 100))
+    New-Logo (Join-Path $assets "Square150x150Logo.scale-$scale.png") ([Math]::Round(150 * $scale / 100))
+    New-Logo (Join-Path $assets "StoreLogo.scale-$scale.png") ([Math]::Round(50 * $scale / 100))
+}
+
+# A manually assembled WinUI MSIX must carry the compiled XAML and a package
+# resource index. dotnet publish emits the framework PRI files but does not
+# generate the package-level resources.pri without a packaging project.
+$appIntermediate = Join-Path $repoRoot 'src\GooseLauncher.App\obj\Release\net8.0-windows10.0.19041.0\win-x64'
+$compiledXaml = @(Get-ChildItem -LiteralPath $appIntermediate -File -Filter '*.xbf')
+if ($compiledXaml.Count -eq 0) { throw "No compiled XAML resources were found under $appIntermediate" }
+foreach ($xbf in $compiledXaml) {
+    Copy-Item -LiteralPath $xbf.FullName -Destination $stageDir -Force
+    Copy-Item -LiteralPath $xbf.FullName -Destination $priInputDir -Force
+}
+Copy-Item -LiteralPath $assets -Destination $priInputDir -Recurse -Force
+Get-ChildItem -LiteralPath $stageDir -File -Filter '*.pri' |
+    Where-Object Name -ne 'resources.pri' |
+    ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $priInputDir -Force }
 
 $manifest = $manifestTemplate.Replace('CN=REPLACE_WITH_SIGNING_IDENTITY', $Publisher)
 [IO.File]::WriteAllText((Join-Path $stageDir 'AppxManifest.xml'), $manifest, [Text.UTF8Encoding]::new($false))
@@ -106,7 +129,17 @@ $sdkVersion = Get-ChildItem -LiteralPath $sdkBinRoot | Where-Object { $_.PSIsCon
     Sort-Object { [Version]$_.Name } -Descending | Select-Object -First 1
 if (-not $sdkVersion) { throw 'Windows SDK MakeAppx could not be located.' }
 $makeAppx = Join-Path $sdkVersion.FullName 'x64\makeappx.exe'
+$makePri = Join-Path $sdkVersion.FullName 'x64\makepri.exe'
 $signTool = Join-Path $sdkVersion.FullName 'x64\signtool.exe'
+$priConfig = Join-Path $artifactRoot 'priconfig.xml'
+$makePriLog = Join-Path $artifactRoot 'makepri.log'
+& $makePri createconfig /cf $priConfig /dq en-US /o *> $makePriLog
+if ($LASTEXITCODE -ne 0) { throw "MakePri createconfig failed with exit code $LASTEXITCODE. See $makePriLog" }
+& $makePri new /pr $priInputDir /cf $priConfig `
+    /mn (Join-Path $stageDir 'AppxManifest.xml') `
+    /of (Join-Path $stageDir 'resources.pri') /o *>> $makePriLog
+if ($LASTEXITCODE -ne 0) { throw "MakePri new failed with exit code $LASTEXITCODE. See $makePriLog" }
+Write-Output 'Package resources generated.'
 Invoke-Checked $makeAppx @('pack', '/d', $stageDir, '/p', $packagePath, '/o', '/h', 'SHA256')
 
 if ($Install) { $Sign = $true }

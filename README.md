@@ -4,7 +4,7 @@ Goose Launcher is a small Windows companion for [Goose](https://github.com/aaif-
 
 ## Current vertical slice
 
-- Windows WPF overlay with folder/file context, keyboard workflow, streaming summary, tool state, cancellation, and ACP permission approval.
+- Windows App SDK / WinUI 3 overlay with folder/file context, keyboard workflow, streaming summary, tool state, cancellation, and ACP permission approval.
 - Per-user single instance and named-pipe warm activation; `goosecompanion://show` cold activation.
 - Goose discovery (including the CLI bundled with Goose Desktop) and ACP v1 over stdio.
 - Explorer `IExplorerCommand` and MSIX manifest/build scaffolding.
