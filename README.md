@@ -11,7 +11,7 @@ Goose Launcher is a small Windows companion for [Goose](https://github.com/aaif-
 - Explorer `IExplorerCommand` and MSIX manifest/build scaffolding.
 - A dependency-free core test executable.
 
-The Companion stays resident after launch so Explorer activations only update and reveal an already-created WinUI window. Closing or submitting the overlay hides it; only **Exit** in the tray menu terminates the process. The tray menu provides Open Goose Desktop, Settings, and Exit. Goose still exclusively owns models, credentials, extensions, agent policy, and conversation history.
+The Companion stays resident after launch so Explorer activations only update and reveal an already-created WinUI window. Closing or submitting the overlay hides it; only **Exit** in the tray menu terminates the process. The tray menu can open Goose Desktop or an interactive Goose CLI session, while the overlay exposes the target selected under **Open when running tasks**. Goose still exclusively owns models, credentials, extensions, agent policy, and conversation history.
 
 ## Develop
 

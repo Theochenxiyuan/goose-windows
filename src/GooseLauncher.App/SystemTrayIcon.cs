@@ -28,6 +28,7 @@ internal sealed class SystemTrayIcon : IDisposable
     private const uint MenuOpenGoose = 1002;
     private const uint MenuSettings = 1003;
     private const uint MenuExit = 1004;
+    private const uint MenuOpenCli = 1005;
 
     private readonly WindowProcedure _windowProcedure;
     private readonly uint _iconId = unchecked((uint)Environment.ProcessId);
@@ -40,6 +41,7 @@ internal sealed class SystemTrayIcon : IDisposable
     private bool _disposed;
 
     internal event Action? OpenGooseRequested;
+    internal event Action? OpenCliRequested;
     internal event Action? SettingsRequested;
     internal event Action? ExitRequested;
 
@@ -162,6 +164,7 @@ internal sealed class SystemTrayIcon : IDisposable
         try
         {
             AppendMenu(menu, MenuString, MenuOpenGoose, Strings.Get("打开 Goose Desktop", "Open Goose Desktop"));
+            AppendMenu(menu, MenuString, MenuOpenCli, Strings.Get("打开 Goose CLI", "Open Goose CLI"));
             AppendMenu(menu, MenuString, MenuSettings, Strings.Get("设置", "Settings"));
             AppendMenu(menu, MenuSeparator, 0, null);
             AppendMenu(menu, MenuString, MenuExit, Strings.Get("退出", "Exit"));
@@ -174,6 +177,7 @@ internal sealed class SystemTrayIcon : IDisposable
             switch (command)
             {
                 case MenuOpenGoose: OpenGooseRequested?.Invoke(); break;
+                case MenuOpenCli: OpenCliRequested?.Invoke(); break;
                 case MenuSettings: SettingsRequested?.Invoke(); break;
                 case MenuExit: ExitRequested?.Invoke(); break;
             }

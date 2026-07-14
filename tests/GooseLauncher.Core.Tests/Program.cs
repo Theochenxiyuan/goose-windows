@@ -13,7 +13,8 @@ var tests = new (string Name, Action Run)[]
     ("Goose locator honors Companion path overrides", LocatesCompanionOverrides),
     ("Goose locator pairs a Desktop override with its bundled CLI", PairsDesktopOverrideWithBundledCli),
     ("Goose locator rejects a missing CLI override", RejectsMissingCliOverride),
-    ("Goose terminal launch preserves exact prompt arguments", BuildsInteractiveRunArguments)
+    ("Goose terminal launch preserves exact prompt arguments", BuildsInteractiveRunArguments),
+    ("Goose CLI session launch uses the selected directory", BuildsInteractiveSessionArguments)
 };
 
 var failures = new List<string>();
@@ -168,6 +169,18 @@ static void BuildsInteractiveRunArguments()
     Equal("--text", startInfo.ArgumentList[1]);
     Equal(prompt, startInfo.ArgumentList[2]);
     Equal("--interactive", startInfo.ArgumentList[3]);
+}
+
+static void BuildsInteractiveSessionArguments()
+{
+    using var workspace = TestWorkspace.Create("CLI workspace");
+    var cli = workspace.File("goose.exe");
+    var startInfo = new GooseInstallation(cli, null).CreateInteractiveSessionStartInfo(workspace.Path);
+    Equal(cli, startInfo.FileName);
+    Equal(Path.GetFullPath(workspace.Path), startInfo.WorkingDirectory);
+    Equal(true, startInfo.UseShellExecute);
+    Equal(1, startInfo.ArgumentList.Count);
+    Equal("session", startInfo.ArgumentList[0]);
 }
 
 static void Equal<T>(T expected, T actual)

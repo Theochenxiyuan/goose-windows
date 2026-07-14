@@ -149,7 +149,7 @@ public sealed partial class SettingsWindow : Window
         DesktopPathTextBox.Header = Strings.Get("Goose Desktop 路径", "Goose Desktop path");
         BrowseCliButton.Content = BrowseDesktopButton.Content = Strings.Get("浏览…", "Browse…");
         AutoCliButton.Content = AutoDesktopButton.Content = Strings.Get("自动检测", "Auto");
-        RunTargetComboBox.Header = Strings.Get("运行时打开", "Open tasks in");
+        RunTargetComboBox.Header = Strings.Get("运行任务时打开", "Open when running tasks");
         DesktopTargetItem.Content = "Goose Desktop";
         TerminalTargetItem.Content = Strings.Get("终端", "Terminal");
         StartWithWindowsToggle.Header = Strings.Get("随 Windows 启动", "Start with Windows");

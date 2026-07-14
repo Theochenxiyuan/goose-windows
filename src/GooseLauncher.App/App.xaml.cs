@@ -52,6 +52,7 @@ public partial class App : Application
 
         _tray = new SystemTrayIcon();
         _tray.OpenGooseRequested += OpenGooseFromTray;
+        _tray.OpenCliRequested += OpenCliFromTray;
         _tray.SettingsRequested += () => ShowSettings(_overlay.AppWindow);
         _tray.ExitRequested += ExitApp;
         _tray.Initialize();
@@ -150,6 +151,23 @@ public partial class App : Application
         catch (Exception error)
         {
             ShowNotification(Strings.Get("无法打开 Goose", "Could not open Goose"), error.Message);
+        }
+    }
+
+    private void OpenCliFromTray()
+    {
+        try
+        {
+            var preferences = CompanionSettingsStore.Load();
+            var installation = GooseInstallation.Locate(preferences.CliPath, preferences.DesktopPath)
+                ?? throw new FileNotFoundException(Strings.Get("Goose CLI 未找到。", "Goose CLI was not found."));
+            var folder = _overlay?.CurrentFolderForLaunch
+                ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            GooseProcessLauncher.OpenTerminalSession(installation, folder);
+        }
+        catch (Exception error)
+        {
+            ShowNotification(Strings.Get("无法打开 Goose CLI", "Could not open Goose CLI"), error.Message);
         }
     }
 

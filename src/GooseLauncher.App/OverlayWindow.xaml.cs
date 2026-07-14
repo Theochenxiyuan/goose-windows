@@ -32,6 +32,7 @@ public sealed partial class OverlayWindow : Window
     private AcpClient? _client;
     private bool _running;
     private bool _handedOff;
+    private bool _hasActivationContext;
     private bool _resetClientWhenIdle;
     private bool _allowClose;
     private uint _currentDpi = 96;
@@ -40,6 +41,10 @@ public sealed partial class OverlayWindow : Window
     private Windows.Graphics.PointInt32 _moveStartPosition;
     private TaskCompletionSource<AcpPermissionDecision>? _permissionCompletion;
     private AcpPermissionRequest? _permissionRequest;
+
+    internal string CurrentFolderForLaunch => _hasActivationContext
+        ? _activation.Folder
+        : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     public OverlayWindow()
     {
@@ -84,6 +89,7 @@ public sealed partial class OverlayWindow : Window
         var contextChanged = !string.Equals(_activation.Folder, request.Folder, StringComparison.OrdinalIgnoreCase) ||
             !_activation.Files.SequenceEqual(request.Files, StringComparer.OrdinalIgnoreCase);
         _activation = request;
+        _hasActivationContext = true;
         FolderPathTextBlock.Text = request.Folder;
         FilesPanel.Visibility = request.Files.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         FilesTextBlock.Text = request.Files.Count == 0
@@ -251,6 +257,7 @@ public sealed partial class OverlayWindow : Window
         _running = submitting;
         PromptTextBox.IsEnabled = !submitting;
         CloseButton.IsEnabled = !submitting;
+        OpenTargetButton.IsEnabled = !submitting;
         OpenSettingsButton.Visibility = Visibility.Collapsed;
         App.Instance?.SetBusy(submitting);
         RunButton.Content = submitting
@@ -279,6 +286,31 @@ public sealed partial class OverlayWindow : Window
     {
         AppWindow.Hide();
         App.Instance?.ShowSettings(AppWindow);
+    }
+
+    private void OpenTarget_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var settings = CompanionSettingsStore.Load();
+            var installation = GooseInstallation.Locate(settings.CliPath, settings.DesktopPath)
+                ?? throw new FileNotFoundException(Strings.Get("Goose CLI 未找到。", "Goose CLI was not found."));
+            if (settings.RunTarget == GooseRunTarget.Desktop)
+            {
+                if (installation.DesktopPath is null)
+                    throw new FileNotFoundException(Strings.Get("Goose Desktop 未找到。", "Goose Desktop was not found."));
+                GooseProcessLauncher.OpenDesktop(installation, "goose://new-session");
+            }
+            else
+            {
+                GooseProcessLauncher.OpenTerminalSession(installation, CurrentFolderForLaunch);
+            }
+            AppWindow.Hide();
+        }
+        catch (Exception error)
+        {
+            SetError(error.Message);
+        }
     }
 
     private async void Close_Click(object sender, RoutedEventArgs e) => await HideOverlayAsync();
@@ -410,6 +442,14 @@ public sealed partial class OverlayWindow : Window
         AllowButton.Content = Strings.Get("允许", "Allow");
         DenyButton.Content = Strings.Get("拒绝", "Deny");
         HintTextBlock.Text = GetDefaultHint();
+        UpdateOpenTargetButton();
+    }
+
+    private void UpdateOpenTargetButton()
+    {
+        OpenTargetButton.Content = CompanionSettingsStore.Load().RunTarget == GooseRunTarget.Terminal
+            ? Strings.Get("打开 Goose CLI", "Open Goose CLI")
+            : Strings.Get("打开 Goose Desktop", "Open Goose Desktop");
     }
 
     private static string GetDefaultHint() =>
@@ -440,6 +480,7 @@ public sealed partial class OverlayWindow : Window
 
     internal async Task OnSettingsChangedAsync()
     {
+        UpdateOpenTargetButton();
         if (_running)
         {
             _resetClientWhenIdle = true;

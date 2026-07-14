@@ -147,6 +147,7 @@
           <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8">
             <Button x:Name="CloseButton" Content="Close" Click="Close_Click" />
             <Button x:Name="OpenSettingsButton" Content="Settings" Visibility="Collapsed" Click="OpenSettings_Click" />
+            <Button x:Name="OpenTargetButton" Content="Open Goose Desktop" Click="OpenTarget_Click" />
             <Button x:Name="RunButton" Content="Run" Click="Run_Click" Style="{StaticResource AccentButtonStyle}" />
           </StackPanel>
           <Grid Grid.Column="1" Width="24" Height="24" VerticalAlignment="Bottom">

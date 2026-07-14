@@ -52,7 +52,7 @@
 
         <ComboBox
             x:Name="RunTargetComboBox"
-            Header="Open tasks in"
+            Header="Open when running tasks"
             HorizontalAlignment="Stretch">
           <ComboBoxItem x:Name="DesktopTargetItem" Content="Goose Desktop" Tag="Desktop" />
           <ComboBoxItem x:Name="TerminalTargetItem" Content="Terminal" Tag="Terminal" />
