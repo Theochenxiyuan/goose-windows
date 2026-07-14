@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/GooseLauncher.Core/GooseLauncher.Core.csproj" />
+  <Project Path="src/GooseLauncher.App/GooseLauncher.App.csproj" />
+  <Project Path="tests/GooseLauncher.Core.Tests/GooseLauncher.Core.Tests.csproj" />
+</Solution>
+
