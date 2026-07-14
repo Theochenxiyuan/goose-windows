@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 
 namespace GooseLauncher.Core;
@@ -50,13 +51,46 @@ public sealed class AcpClient : IAsyncDisposable
     public async Task PromptAsync(string text, IReadOnlyList<string> files, CancellationToken cancellationToken = default)
     {
         if (SessionId is null) throw new InvalidOperationException("Create a session before prompting.");
-        var prompt = new List<object> { new { type = "text", text } };
+        var prompt = new List<object> { new { type = "text", text = BuildPromptText(text, files) } };
         foreach (var file in files)
         {
-            prompt.Add(new { type = "resource_link", uri = new Uri(file).AbsoluteUri, name = Path.GetFileName(file) });
+            var uri = new Uri(file).AbsoluteUri;
+            var mimeType = GetImageMimeType(file);
+            var fileLength = new FileInfo(file).Length;
+            prompt.Add(new
+            {
+                type = "resource_link",
+                uri,
+                name = Path.GetFileName(file),
+                mimeType,
+                size = fileLength
+            });
         }
         await RequestAsync("session/prompt", new { sessionId = SessionId, prompt }, cancellationToken);
     }
+
+    internal static string BuildPromptText(string text, IReadOnlyList<string> files)
+    {
+        if (files.Count == 0) return text;
+
+        var result = new StringBuilder(text.TrimEnd());
+        result.AppendLine();
+        result.AppendLine();
+        result.AppendLine("User-selected files (exact paths; treat these as explicit inputs to the task):");
+        for (var index = 0; index < files.Count; index++)
+            result.Append(index + 1).Append(". ").AppendLine(Path.GetFullPath(files[index]));
+        return result.ToString().TrimEnd();
+    }
+
+    private static string? GetImageMimeType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        ".bmp" => "image/bmp",
+        _ => null
+    };
 
     public Task CancelAsync(CancellationToken cancellationToken = default)
     {

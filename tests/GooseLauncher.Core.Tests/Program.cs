@@ -8,6 +8,7 @@ var tests = new (string Name, Action Run)[]
     ("activation rejects a different parent", RejectsDifferentParent),
     ("activation URI round-trips Unicode and coordinates", ParsesProtocolUri),
     ("activation rejects too many files", RejectsTooManyFiles),
+    ("ACP prompt text names selected files", PromptNamesSelectedFiles),
     ("Goose locator honors explicit CLI path", LocatesExplicitCli)
 };
 
@@ -34,9 +35,16 @@ if (failures.Count == 0 && args.Contains("--integration", StringComparer.Ordinal
         Console.WriteLine($"PASS Goose ACP v1 initialize + session/new ({sessionId})");
         if (args.Contains("--prompt", StringComparer.OrdinalIgnoreCase))
         {
-            await client.PromptAsync("Reply with exactly: Goose Launcher ACP OK", [], timeout.Token);
+            var filesIndex = Array.FindIndex(args, value => value.Equals("--files", StringComparison.OrdinalIgnoreCase));
+            var files = filesIndex < 0
+                ? []
+                : args.Skip(filesIndex + 1).TakeWhile(value => !value.StartsWith("--", StringComparison.Ordinal)).ToArray();
+            await client.PromptAsync("Reply with exactly: Goose Launcher ACP OK", files, timeout.Token);
             if (response.Length == 0) throw new Exception("Goose completed session/prompt without an agent_message_chunk.");
-            Console.WriteLine($"PASS Goose ACP session/prompt + agent_message_chunk ({response.ToString().Trim()})");
+            var responseText = response.ToString().Trim();
+            if (responseText.StartsWith("Ran into this error:", StringComparison.OrdinalIgnoreCase))
+                throw new Exception(responseText);
+            Console.WriteLine($"PASS Goose ACP session/prompt + agent_message_chunk ({responseText})");
         }
     }
     catch (Exception error)
@@ -83,6 +91,17 @@ static void RejectsTooManyFiles()
     using var workspace = TestWorkspace.Create();
     var files = Enumerable.Range(0, ActivationRequest.MaxFiles + 1).Select(index => workspace.File($"{index}.txt")).ToArray();
     Throws<InvalidDataException>(() => ActivationRequest.Create(workspace.Path, files: files));
+}
+
+static void PromptNamesSelectedFiles()
+{
+    using var workspace = TestWorkspace.Create("附件目录");
+    var one = workspace.File("ui.png");
+    var two = workspace.File("witch_icon.png");
+    var prompt = AcpClient.BuildPromptText("这两个相同吗？", [one, two]);
+    if (!prompt.StartsWith("这两个相同吗？", StringComparison.Ordinal)) throw new Exception("Original task text was changed.");
+    if (!prompt.Contains(one, StringComparison.Ordinal) || !prompt.Contains(two, StringComparison.Ordinal))
+        throw new Exception("Selected file paths are missing from the ACP text fallback.");
 }
 
 static void LocatesExplicitCli()
