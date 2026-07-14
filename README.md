@@ -5,12 +5,13 @@ Goose Launcher is a small Windows companion for [Goose](https://github.com/aaif-
 ## Current vertical slice
 
 - Windows App SDK / WinUI 3 launcher overlay with folder/file context and a keyboard-first task input.
-- Per-user single instance and named-pipe warm activation; `goosecompanion://show` cold activation.
+- Resident notification-area host, pre-created hidden overlay, per-user single instance, and named-pipe warm activation; `goosecompanion://show` remains the cold-start fallback.
 - Goose discovery (including the CLI bundled with Goose Desktop) and ACP v1 over stdio.
+- A small Companion settings window for CLI/Desktop path overrides, Desktop/Terminal task target, and start-with-Windows registration.
 - Explorer `IExplorerCommand` and MSIX manifest/build scaffolding.
 - A dependency-free core test executable.
 
-The Companion is deliberately on-demand and has no tray icon. After ACP confirms that the session exists and the prompt request has been written, the overlay opens that session in Goose Desktop and disappears. The hidden Companion keeps only the active ACP turn alive, resurfaces solely if ACP needs a permission decision, and exits when the turn ends. Goose Desktop remains the only resident tray/configuration host.
+The Companion stays resident after launch so Explorer activations only update and reveal an already-created WinUI window. Closing or submitting the overlay hides it; only **Exit** in the tray menu terminates the process. The tray menu provides New task, Open Goose, Settings, and Exit. Goose still exclusively owns models, credentials, extensions, agent policy, and conversation history.
 
 ## Develop
 
@@ -23,6 +24,8 @@ dotnet run --project .\src\GooseLauncher.App -- --folder "$PWD"
 ```
 
 The app locates Goose in `PATH`, `GOOSE_CLI_PATH`, and common Desktop install locations such as `resources\bin\goose.exe`.
+
+In **Goose Desktop** mode, the Companion creates a durable ACP session and opens it with `goose://resume/<sessionId>`. In **Terminal** mode, it starts `goose run --text <prompt> --interactive` in Windows Terminal with the selected working directory. Both modes include the exact selected file paths in the task context.
 
 ## ACP and Desktop hand-off
 

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using GooseLauncher.Core;
 using Microsoft.UI.Input;
@@ -27,16 +26,14 @@ public sealed partial class OverlayWindow : Window
     private AcpClient? _client;
     private bool _running;
     private bool _handedOff;
+    private bool _resetClientWhenIdle;
     private bool _allowClose;
-    private bool _exitRequested;
     private uint _currentDpi = 96;
     private uint? _movePointerId;
     private NativePoint _moveStartCursor;
     private Windows.Graphics.PointInt32 _moveStartPosition;
     private TaskCompletionSource<AcpPermissionDecision>? _permissionCompletion;
     private AcpPermissionRequest? _permissionRequest;
-
-    internal event Action? ExitRequested;
 
     public OverlayWindow()
     {
@@ -61,7 +58,7 @@ public sealed partial class OverlayWindow : Window
             _ = sender;
             if (_allowClose) return;
             args.Cancel = true;
-            _ = RequestExitAsync();
+            _ = HideOverlayAsync();
         };
 
         ApplyToolWindowStyle(windowHandle);
@@ -72,9 +69,9 @@ public sealed partial class OverlayWindow : Window
     {
         if (_running)
         {
-            PositionNearPointer(request.X, request.Y);
-            AppWindow.Show();
-            Activate();
+            App.Instance?.ShowNotification(
+                Strings.Get("Goose 任务正在运行", "Goose task is running"),
+                Strings.Get("当前任务完成后即可新建任务。", "A new task can be started after the current task finishes."));
             return;
         }
 
@@ -95,6 +92,8 @@ public sealed partial class OverlayWindow : Window
         DispatcherQueue.TryEnqueue(() => PromptTextBox.Focus(FocusState.Programmatic));
     }
 
+    internal void ShowCurrent() => ShowActivation(_activation with { X = null, Y = null });
+
     private async void Run_Click(object sender, RoutedEventArgs e) => await RunAsync();
 
     private async Task RunAsync()
@@ -102,12 +101,42 @@ public sealed partial class OverlayWindow : Window
         var prompt = PromptTextBox.Text.Trim();
         if (_running || string.IsNullOrWhiteSpace(prompt)) return;
 
-        var installation = GooseInstallation.Locate();
+        var settings = CompanionSettingsStore.Load();
+        var installation = GooseInstallation.Locate(settings.CliPath, settings.DesktopPath);
         if (installation is null)
         {
             SetError(Strings.Get(
-                "找不到 Goose CLI。请安装 Goose Desktop，或设置 GOOSE_CLI_PATH。",
-                "Goose CLI was not found. Install Goose Desktop or set GOOSE_CLI_PATH."));
+                "找不到 Goose CLI。请在 Goose Launcher 设置中检查路径。",
+                "Goose CLI was not found. Check the path in Goose Launcher settings."));
+            return;
+        }
+
+        if (settings.RunTarget == GooseRunTarget.Desktop && installation.DesktopPath is null)
+        {
+            SetError(Strings.Get(
+                "找不到 Goose Desktop。请在 Goose Launcher 设置中检查路径。",
+                "Goose Desktop was not found. Check the path in Goose Launcher settings."));
+            return;
+        }
+
+        ErrorInfoBar.IsOpen = false;
+        SetSubmitting(true);
+
+        if (settings.RunTarget == GooseRunTarget.Terminal)
+        {
+            try
+            {
+                GooseProcessLauncher.OpenTerminal(
+                    installation,
+                    _activation.Folder,
+                    AcpClient.BuildPromptText(prompt, _activation.Files));
+                AppWindow.Hide();
+                await CompleteRunAsync();
+            }
+            catch (Exception error)
+            {
+                SetError(error.Message);
+            }
             return;
         }
 
@@ -118,32 +147,54 @@ public sealed partial class OverlayWindow : Window
             _client.PermissionRequested += RequestPermissionAsync;
         }
 
-        ErrorInfoBar.IsOpen = false;
-        SetSubmitting(true);
         try
         {
             var sessionId = await _client.NewSessionAsync(_activation.Folder);
             var promptTask = await _client.StartPromptAsync(prompt, _activation.Files);
 
+            GooseProcessLauncher.OpenDesktop(installation, $"goose://resume/{Uri.EscapeDataString(sessionId)}");
             _handedOff = true;
-            OpenGoose(sessionId);
             AppWindow.Hide();
 
             await promptTask;
-            _running = false;
-            await RequestExitAsync();
+            await CompleteRunAsync();
         }
         catch (OperationCanceledException)
         {
-            _running = false;
-            if (_handedOff) await RequestExitAsync();
+            if (_handedOff) await CompleteRunAsync();
             else SetSubmitting(false);
         }
         catch (Exception error)
         {
-            _running = false;
-            if (_handedOff) await RequestExitAsync();
-            else SetError(error.Message);
+            if (_handedOff)
+            {
+                App.Instance?.ShowNotification(
+                    Strings.Get("Goose 任务失败", "Goose task failed"),
+                    error.Message);
+                await CompleteRunAsync();
+            }
+            else
+            {
+                if (_client is not null)
+                {
+                    try { await _client.CancelAsync(); }
+                    catch { }
+                }
+                SetError(error.Message);
+            }
+        }
+    }
+
+    private async Task CompleteRunAsync()
+    {
+        _running = false;
+        _handedOff = false;
+        PromptTextBox.Text = string.Empty;
+        SetSubmitting(false);
+        if (_resetClientWhenIdle)
+        {
+            _resetClientWhenIdle = false;
+            await DisposeClientAsync();
         }
     }
 
@@ -198,7 +249,8 @@ public sealed partial class OverlayWindow : Window
         _running = submitting;
         PromptTextBox.IsEnabled = !submitting;
         CloseButton.IsEnabled = !submitting;
-        ConfigureGooseButton.Visibility = Visibility.Collapsed;
+        OpenSettingsButton.Visibility = Visibility.Collapsed;
+        App.Instance?.SetBusy(submitting);
         RunButton.Content = submitting
             ? Strings.Get("正在打开 Goose…", "Opening Goose…")
             : Strings.Get("运行", "Run");
@@ -218,35 +270,16 @@ public sealed partial class OverlayWindow : Window
         SetSubmitting(false);
         ErrorInfoBar.Message = message;
         ErrorInfoBar.IsOpen = true;
-        ConfigureGooseButton.Visibility = Visibility.Visible;
+        OpenSettingsButton.Visibility = Visibility.Visible;
     }
 
-    internal void OpenGoose(string sessionId)
+    private void OpenSettings_Click(object sender, RoutedEventArgs e)
     {
-        StartGoose($"goose://resume/{Uri.EscapeDataString(sessionId)}");
+        AppWindow.Hide();
+        App.Instance?.ShowSettings(AppWindow);
     }
 
-    private async void ConfigureGoose_Click(object sender, RoutedEventArgs e)
-    {
-        StartGoose("goose://new-session");
-        await RequestExitAsync();
-    }
-
-    private static void StartGoose(string uri)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
-        }
-        catch
-        {
-            var installation = GooseInstallation.Locate();
-            if (installation?.DesktopPath is not null)
-                Process.Start(new ProcessStartInfo(installation.DesktopPath) { UseShellExecute = true });
-        }
-    }
-
-    private async void Close_Click(object sender, RoutedEventArgs e) => await RequestExitAsync();
+    private async void Close_Click(object sender, RoutedEventArgs e) => await HideOverlayAsync();
 
     private void PromptTextBox_TextChanged(object sender, TextChangedEventArgs e) => UpdateRunButton();
 
@@ -257,7 +290,7 @@ public sealed partial class OverlayWindow : Window
     {
         if (e.Key != VirtualKey.Escape) return;
         e.Handled = true;
-        _ = RequestExitAsync();
+        _ = HideOverlayAsync();
     }
 
     private void PromptTextBox_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
@@ -355,7 +388,7 @@ public sealed partial class OverlayWindow : Window
         PromptTextBox.PlaceholderText = Strings.Get("告诉 Goose 要完成什么…", "Tell Goose what to do…");
         RunButton.Content = Strings.Get("运行", "Run");
         CloseButton.Content = Strings.Get("关闭", "Close");
-        ConfigureGooseButton.Content = Strings.Get("在 Goose 中配置", "Configure in Goose");
+        OpenSettingsButton.Content = Strings.Get("设置", "Settings");
         AllowButton.Content = Strings.Get("允许", "Allow");
         DenyButton.Content = Strings.Get("拒绝", "Deny");
         HintTextBlock.Text = GetDefaultHint();
@@ -370,6 +403,16 @@ public sealed partial class OverlayWindow : Window
     {
         _permissionCompletion?.TrySetResult(AcpPermissionDecision.Cancelled);
         _permissionCompletion = null;
+        if (_running && _client is not null)
+        {
+            try { await _client.CancelAsync(); }
+            catch { }
+        }
+        await DisposeClientAsync();
+    }
+
+    private async Task DisposeClientAsync()
+    {
         if (_client is not null)
         {
             await _client.DisposeAsync();
@@ -377,17 +420,27 @@ public sealed partial class OverlayWindow : Window
         }
     }
 
-    private async Task RequestExitAsync()
+    internal async Task OnSettingsChangedAsync()
     {
-        if (_exitRequested) return;
-        _exitRequested = true;
+        if (_running)
+        {
+            _resetClientWhenIdle = true;
+            return;
+        }
+        await DisposeClientAsync();
+    }
+
+    private async Task HideOverlayAsync()
+    {
         CompletePermission(allow: false);
-        if (_running && _client is not null)
+        if (_running && !_handedOff && _client is not null)
         {
             try { await _client.CancelAsync(); }
             catch { }
+            _running = false;
+            SetSubmitting(false);
         }
-        ExitRequested?.Invoke();
+        AppWindow.Hide();
     }
 
     internal void CloseForExit()

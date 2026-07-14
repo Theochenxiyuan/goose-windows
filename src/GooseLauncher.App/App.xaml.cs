@@ -1,5 +1,6 @@
 using System.Security.Principal;
 using GooseLauncher.Core;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 
 namespace GooseLauncher.App;
@@ -11,6 +12,8 @@ public partial class App : Application
     private Mutex? _singleInstance;
     private ActivationPipeServer? _pipeServer;
     private OverlayWindow? _overlay;
+    private SettingsWindow? _settings;
+    private SystemTrayIcon? _tray;
     private bool _exiting;
 
     public App()
@@ -21,20 +24,24 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        _ = args;
+        var launchToTray = IsTrayLaunch(Program.CommandLineArgs);
+        var launchToSettings = IsSettingsLaunch(Program.CommandLineArgs);
         var request = ParseActivation(Program.CommandLineArgs);
         var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
         _singleInstance = new Mutex(true, $"Local\\GooseLauncher.{sid}", out var firstInstance);
         if (!firstInstance)
         {
-            if (request is not null)
-                _ = RedirectAndExitAsync(request);
-            else
+            if (launchToTray)
                 Exit();
+            else if (launchToSettings)
+                Exit();
+            else
+                _ = RedirectAndExitAsync(request ?? ActivationRequest.Create(Environment.CurrentDirectory));
             return;
         }
 
         _overlay = new OverlayWindow();
-        _overlay.ExitRequested += ExitApp;
 
         _pipeServer = new ActivationPipeServer();
         _pipeServer.ActivationReceived += activation =>
@@ -43,21 +50,56 @@ public partial class App : Application
             _overlay.DispatcherQueue.TryEnqueue(() => _overlay.SetDiagnostic(message));
         _pipeServer.Start();
 
-        _overlay.ShowActivation(request ?? ActivationRequest.Create(Environment.CurrentDirectory));
+        _tray = new SystemTrayIcon();
+        _tray.NewTaskRequested += () => _overlay.DispatcherQueue.TryEnqueue(_overlay.ShowCurrent);
+        _tray.OpenGooseRequested += OpenGooseFromTray;
+        _tray.SettingsRequested += () => ShowSettings(_overlay.AppWindow);
+        _tray.ExitRequested += ExitApp;
+        _tray.Initialize();
+
+        if (launchToSettings)
+            ShowSettings(_overlay.AppWindow);
+        else if (!launchToTray)
+            _overlay.ShowActivation(request ?? ActivationRequest.Create(Environment.CurrentDirectory));
     }
 
     private async Task RedirectAndExitAsync(ActivationRequest request)
     {
         await ActivationPipeServer.TrySendAsync(request, TimeSpan.FromSeconds(3));
+        _singleInstance?.Dispose();
         Exit();
     }
+
+    private static bool IsTrayLaunch(string[] args)
+    {
+        if (args.Any(value => value.Equals("--tray", StringComparison.OrdinalIgnoreCase))) return true;
+        foreach (var value in args)
+        {
+            if (!value.StartsWith("goosecompanion:", StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                if (new Uri(value).Host.Equals("tray", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            catch { }
+        }
+        return false;
+    }
+
+    private static bool IsSettingsLaunch(string[] args) =>
+        args.Any(value => value.Equals("--settings", StringComparison.OrdinalIgnoreCase));
 
     private static ActivationRequest? ParseActivation(string[] args)
     {
         try
         {
             var uriText = args.FirstOrDefault(value => value.StartsWith("goosecompanion:", StringComparison.OrdinalIgnoreCase));
-            if (uriText is not null) return ActivationRequest.FromProtocolUri(new Uri(uriText));
+            if (uriText is not null)
+            {
+                var uri = new Uri(uriText);
+                return uri.Host.Equals("show", StringComparison.OrdinalIgnoreCase)
+                    ? ActivationRequest.FromProtocolUri(uri)
+                    : null;
+            }
 
             var folderIndex = Array.FindIndex(args, value => value.Equals("--folder", StringComparison.OrdinalIgnoreCase));
             if (folderIndex >= 0 && folderIndex + 1 < args.Length)
@@ -69,11 +111,47 @@ public partial class App : Application
         }
         catch
         {
-            // Invalid external activations fall back to the current directory. The
-            // overlay remains usable and does not expose a second diagnostics UI.
+            // Invalid external activations fall back to the current directory.
         }
 
         return null;
+    }
+
+    internal void ShowSettings(AppWindow? relativeTo = null)
+    {
+        _settings ??= CreateSettingsWindow();
+        _settings.ShowSettings(relativeTo);
+    }
+
+    private SettingsWindow CreateSettingsWindow()
+    {
+        var window = new SettingsWindow();
+        window.SettingsSaved += () =>
+        {
+            if (_overlay is not null) _ = _overlay.OnSettingsChangedAsync();
+        };
+        return window;
+    }
+
+    internal void SetBusy(bool busy) => _tray?.SetBusy(busy);
+
+    internal void ShowNotification(string title, string message) => _tray?.ShowNotification(title, message);
+
+    private void OpenGooseFromTray()
+    {
+        try
+        {
+            var preferences = CompanionSettingsStore.Load();
+            var installation = GooseInstallation.Locate(preferences.CliPath, preferences.DesktopPath)
+                ?? throw new FileNotFoundException(Strings.Get("Goose CLI 未找到。", "Goose CLI was not found."));
+            if (installation.DesktopPath is null)
+                throw new FileNotFoundException(Strings.Get("Goose Desktop 未找到。", "Goose Desktop was not found."));
+            GooseProcessLauncher.OpenDesktop(installation, "goose://new-session");
+        }
+        catch (Exception error)
+        {
+            ShowNotification(Strings.Get("无法打开 Goose", "Could not open Goose"), error.Message);
+        }
     }
 
     private async void ExitApp()
@@ -84,9 +162,11 @@ public partial class App : Application
         if (_pipeServer is not null) await _pipeServer.DisposeAsync();
         if (_overlay is not null) await _overlay.DisposeSessionAsync();
 
+        _tray?.Dispose();
+        _settings?.CloseForExit();
+        _overlay?.CloseForExit();
         _singleInstance?.ReleaseMutex();
         _singleInstance?.Dispose();
-        _overlay?.CloseForExit();
         Exit();
     }
 }

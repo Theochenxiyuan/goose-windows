@@ -78,7 +78,7 @@ public sealed class AcpClient : IAsyncDisposable
 
     private static async Task AwaitPromptAsync(Task<JsonElement> response) => await response;
 
-    internal static string BuildPromptText(string text, IReadOnlyList<string> files)
+    public static string BuildPromptText(string text, IReadOnlyList<string> files)
     {
         if (files.Count == 0) return text;
 

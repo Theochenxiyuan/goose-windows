@@ -5,18 +5,29 @@ namespace GooseLauncher.Core;
 
 public sealed record GooseInstallation(string CliPath, string? DesktopPath)
 {
-    public static GooseInstallation? Locate()
+    public static GooseInstallation? Locate(string? cliOverride = null, string? desktopOverride = null)
     {
+        var configuredCli = NormalizeOverride(cliOverride);
+        if (configuredCli is not null && !File.Exists(configuredCli)) return null;
+
+        var configuredDesktop = NormalizeOverride(desktopOverride);
+        var desktopOverrideIsValid = configuredDesktop is not null && File.Exists(configuredDesktop);
         var desktopCandidates = new[]
         {
-            FindDesktopFromProtocol(),
+            desktopOverrideIsValid ? configuredDesktop : null,
+            configuredDesktop is null ? FindDesktopFromProtocol() : null,
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Goose", "Goose.exe"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Goose", "Goose.exe"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Goose", "Goose.exe")
         };
         var explicitCli = Environment.GetEnvironmentVariable("GOOSE_CLI_PATH");
+        var configuredDesktopCli = desktopOverrideIsValid
+            ? Path.Combine(Path.GetDirectoryName(configuredDesktop!)!, "resources", "bin", "goose.exe")
+            : null;
         var cliCandidates = new List<string?>
         {
+            configuredCli,
+            configuredDesktopCli,
             explicitCli,
             FindOnPath("goose.exe"),
             FindOnPath("goose"),
@@ -28,8 +39,17 @@ public sealed record GooseInstallation(string CliPath, string? DesktopPath)
         }
         var cli = cliCandidates.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
         if (cli is null) return null;
-        var desktopPath = desktopCandidates.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
+        var desktopPath = configuredDesktop is not null
+            ? (desktopOverrideIsValid ? configuredDesktop : null)
+            : desktopCandidates.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
         return new GooseInstallation(Path.GetFullPath(cli), desktopPath);
+    }
+
+    private static string? NormalizeOverride(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try { return Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'))); }
+        catch { return path.Trim(); }
     }
 
     public ProcessStartInfo CreateAcpStartInfo() => new(CliPath, "acp")

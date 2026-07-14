@@ -9,7 +9,10 @@ var tests = new (string Name, Action Run)[]
     ("activation URI round-trips Unicode and coordinates", ParsesProtocolUri),
     ("activation rejects too many files", RejectsTooManyFiles),
     ("ACP prompt text names selected files", PromptNamesSelectedFiles),
-    ("Goose locator honors explicit CLI path", LocatesExplicitCli)
+    ("Goose locator honors explicit CLI path", LocatesExplicitCli),
+    ("Goose locator honors Companion path overrides", LocatesCompanionOverrides),
+    ("Goose locator pairs a Desktop override with its bundled CLI", PairsDesktopOverrideWithBundledCli),
+    ("Goose locator rejects a missing CLI override", RejectsMissingCliOverride)
 };
 
 var failures = new List<string>();
@@ -117,6 +120,37 @@ static void LocatesExplicitCli()
         Equal(cli, GooseInstallation.Locate()?.CliPath);
     }
     finally { Environment.SetEnvironmentVariable("GOOSE_CLI_PATH", previous); }
+}
+
+static void LocatesCompanionOverrides()
+{
+    using var workspace = TestWorkspace.Create();
+    var cli = workspace.File("goose.exe");
+    var desktop = workspace.File("Goose.exe");
+    var installation = GooseInstallation.Locate(cli, desktop) ?? throw new Exception("Configured Goose paths were not resolved.");
+    Equal(cli, installation.CliPath);
+    Equal(desktop, installation.DesktopPath);
+}
+
+static void RejectsMissingCliOverride()
+{
+    using var workspace = TestWorkspace.Create();
+    var missing = System.IO.Path.Combine(workspace.Path, "missing-goose.exe");
+    Equal<GooseInstallation?>(null, GooseInstallation.Locate(missing));
+}
+
+static void PairsDesktopOverrideWithBundledCli()
+{
+    using var workspace = TestWorkspace.Create();
+    var desktopDirectory = Directory.CreateDirectory(System.IO.Path.Combine(workspace.Path, "desktop")).FullName;
+    var desktop = System.IO.Path.Combine(desktopDirectory, "Goose.exe");
+    File.WriteAllText(desktop, "test");
+    var cliDirectory = Directory.CreateDirectory(System.IO.Path.Combine(desktopDirectory, "resources", "bin")).FullName;
+    var cli = System.IO.Path.Combine(cliDirectory, "goose.exe");
+    File.WriteAllText(cli, "test");
+    var installation = GooseInstallation.Locate(desktopOverride: desktop) ?? throw new Exception("Desktop override was not resolved.");
+    Equal(cli, installation.CliPath);
+    Equal(desktop, installation.DesktopPath);
 }
 
 static void Equal<T>(T expected, T actual)
