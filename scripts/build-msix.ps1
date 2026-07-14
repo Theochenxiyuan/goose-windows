@@ -121,8 +121,12 @@ if ($Sign) {
 if ($Install) {
     $certificateFile = Join-Path $artifactRoot 'GooseLauncher.Dev.cer'
     Export-Certificate -Cert $certificate -FilePath $certificateFile -Force | Out-Null
-    if (-not (Get-ChildItem Cert:\CurrentUser\TrustedPeople | Where-Object Thumbprint -eq $certificate.Thumbprint)) {
-        Import-Certificate -FilePath $certificateFile -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
+    if (-not (Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Thumbprint -eq $certificate.Thumbprint)) {
+        $escapedCertificatePath = $certificateFile.Replace("'", "''")
+        $elevatedCommand = "Import-Certificate -FilePath '$escapedCertificatePath' -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null"
+        $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($elevatedCommand))
+        $elevated = Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', $encodedCommand -WindowStyle Hidden -Wait -PassThru
+        if ($elevated.ExitCode -ne 0) { throw "Development certificate installation failed with exit code $($elevated.ExitCode)" }
     }
     Get-Process -Name 'GooseLauncher.App' -ErrorAction SilentlyContinue | Stop-Process -Force
     Get-AppxPackage -Name 'GooseLauncher' -ErrorAction SilentlyContinue | Remove-AppxPackage
