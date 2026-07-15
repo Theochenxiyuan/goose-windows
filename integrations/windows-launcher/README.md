@@ -37,4 +37,6 @@ cd ..\..\integrations\windows-launcher
 .\scripts\build-msix.ps1 -Install -RestartExplorer
 ```
 
+`pnpm run package` prepares the Windows runtime before Electron packaging. The MSIX build refuses to continue unless the packaged runtime contains Goose CLI, `uv`, `uvx`, and the portable Node `npx` bootstrapper.
+
 See [docs/architecture.md](docs/architecture.md) for protocol and ownership boundaries.

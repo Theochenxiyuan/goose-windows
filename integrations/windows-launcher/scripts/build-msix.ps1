@@ -75,8 +75,13 @@ function New-ResizedPng([string]$Source, [string]$Destination, [int]$Size) {
 if (-not (Test-Path -LiteralPath (Join-Path $DesktopSourceDir 'Goose.exe'))) {
     throw "Packaged Goose Desktop was not found in $DesktopSourceDir. Run pnpm run package first."
 }
-if (-not (Test-Path -LiteralPath (Join-Path $DesktopSourceDir 'resources\bin\goose.exe'))) {
-    throw "Bundled Goose CLI was not found in $DesktopSourceDir\resources\bin."
+$desktopRuntimeDir = Join-Path $DesktopSourceDir 'resources\bin'
+$requiredDesktopRuntimeFiles = @('goose.exe', 'uv.exe', 'uvx.exe', 'npx.cmd')
+foreach ($runtimeFile in $requiredDesktopRuntimeFiles) {
+    $runtimePath = Join-Path $desktopRuntimeDir $runtimeFile
+    if (-not (Test-Path -LiteralPath $runtimePath -PathType Leaf) -or (Get-Item -LiteralPath $runtimePath).Length -eq 0) {
+        throw "Packaged Goose runtime is incomplete: $runtimePath is missing or empty. Run pnpm run package first."
+    }
 }
 
 Reset-Directory $publishDir
