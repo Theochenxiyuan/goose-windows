@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace GooseLauncher.Core;
 
 public sealed record ActivationRequest(string Folder, int? X, int? Y, IReadOnlyList<string> Files)
@@ -29,36 +27,5 @@ public sealed record ActivationRequest(string Folder, int? X, int? Y, IReadOnlyL
         return new ActivationRequest(fullFolder, x, y, validated);
     }
 
-    public static ActivationRequest FromProtocolUri(Uri uri)
-    {
-        if (!uri.Scheme.Equals("goosecompanion", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Unsupported activation scheme.");
-        if (!uri.Host.Equals("show", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Unsupported activation action.");
-
-        var query = ParseQuery(uri.Query);
-        if (!query.TryGetValue("folder", out var folder)) throw new InvalidDataException("Activation is missing folder.");
-        var x = ParseNullableInt(query.GetValueOrDefault("x"));
-        var y = ParseNullableInt(query.GetValueOrDefault("y"));
-        string?[] files = [];
-        if (query.TryGetValue("files", out var filesJson) && !string.IsNullOrWhiteSpace(filesJson))
-            files = JsonSerializer.Deserialize<string?[]>(filesJson) ?? [];
-        return Create(folder, x, y, files);
-    }
-
-    private static Dictionary<string, string> ParseQuery(string query)
-    {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var separator = pair.IndexOf('=');
-            var key = separator < 0 ? pair : pair[..separator];
-            var value = separator < 0 ? string.Empty : pair[(separator + 1)..];
-            result[Uri.UnescapeDataString(key.Replace('+', ' '))] = Uri.UnescapeDataString(value.Replace('+', ' '));
-        }
-        return result;
-    }
-
-    private static int? ParseNullableInt(string? value) => int.TryParse(value, out var parsed) ? parsed : null;
 }
 

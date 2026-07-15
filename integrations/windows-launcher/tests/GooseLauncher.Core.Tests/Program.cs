@@ -1,14 +1,17 @@
+using System.Buffers.Binary;
+using System.IO.Pipes;
 using System.Text.Json;
-using System.Text;
 using GooseLauncher.Core;
 
 var tests = new (string Name, Action Run)[]
 {
     ("activation accepts sibling files", AcceptsSiblingFiles),
     ("activation rejects a different parent", RejectsDifferentParent),
-    ("activation URI round-trips Unicode and coordinates", ParsesProtocolUri),
     ("activation rejects too many files", RejectsTooManyFiles),
-    ("ACP prompt text names selected files", PromptNamesSelectedFiles),
+    ("task prompt text names selected files", PromptNamesSelectedFiles),
+    ("Desktop activation frames preserve Unicode inputs", FramesDesktopActivation),
+    ("Desktop activation client completes capabilities and run handshake", ActivatesDesktopOverUserPipe),
+    ("Desktop cold start contains no task data", BuildsPrivateDesktopLaunchArguments),
     ("Goose locator honors explicit CLI path", LocatesExplicitCli),
     ("Goose locator honors Companion path overrides", LocatesCompanionOverrides),
     ("Goose locator pairs a Desktop override with its bundled CLI", PairsDesktopOverrideWithBundledCli),
@@ -24,42 +27,6 @@ foreach (var test in tests)
     catch (Exception error) { failures.Add($"FAIL {test.Name}: {error.Message}"); }
 }
 foreach (var failure in failures) Console.Error.WriteLine(failure);
-if (failures.Count == 0 && args.Contains("--integration", StringComparer.OrdinalIgnoreCase))
-{
-    try
-    {
-        var installation = GooseInstallation.Locate() ?? throw new Exception("Goose CLI is not installed.");
-        await using var client = new AcpClient(installation);
-        var response = new StringBuilder();
-        client.UpdateReceived += update => { if (update.Kind == AcpUpdateKind.Message) response.Append(update.Text); };
-        client.DiagnosticReceived += message => Console.WriteLine($"ACP diagnostic: {message}");
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        await client.StartAsync(timeout.Token);
-        Console.WriteLine("PASS Goose ACP v1 initialize");
-        var sessionId = await client.NewSessionAsync(Environment.CurrentDirectory, timeout.Token);
-        Console.WriteLine($"PASS Goose ACP v1 initialize + session/new ({sessionId})");
-        if (args.Contains("--prompt", StringComparer.OrdinalIgnoreCase))
-        {
-            var filesIndex = Array.FindIndex(args, value => value.Equals("--files", StringComparison.OrdinalIgnoreCase));
-            var files = filesIndex < 0
-                ? []
-                : args.Skip(filesIndex + 1).TakeWhile(value => !value.StartsWith("--", StringComparison.Ordinal)).ToArray();
-            var promptCompletion = await client.StartPromptAsync("Reply with exactly: Goose Launcher ACP OK", files, timeout.Token);
-            Console.WriteLine("PASS Goose ACP session/prompt request written");
-            await promptCompletion;
-            if (response.Length == 0) throw new Exception("Goose completed session/prompt without an agent_message_chunk.");
-            var responseText = response.ToString().Trim();
-            if (responseText.StartsWith("Ran into this error:", StringComparison.OrdinalIgnoreCase))
-                throw new Exception(responseText);
-            Console.WriteLine($"PASS Goose ACP session/prompt + agent_message_chunk ({responseText})");
-        }
-    }
-    catch (Exception error)
-    {
-        failures.Add($"FAIL Goose ACP integration: {error.Message}");
-        Console.Error.WriteLine(failures[^1]);
-    }
-}
 return failures.Count == 0 ? 0 : 1;
 
 static void AcceptsSiblingFiles()
@@ -81,18 +48,6 @@ static void RejectsDifferentParent()
     Throws<InvalidDataException>(() => ActivationRequest.Create(workspace.Path, files: [file]));
 }
 
-static void ParsesProtocolUri()
-{
-    using var workspace = TestWorkspace.Create("测试 工作区");
-    var file = workspace.File("示例 file.txt");
-    var files = Uri.EscapeDataString(JsonSerializer.Serialize(new[] { file }));
-    var folder = Uri.EscapeDataString(workspace.Path);
-    var request = ActivationRequest.FromProtocolUri(new Uri($"goosecompanion://show?folder={folder}&files={files}&x=-120&y=1440"));
-    Equal(-120, request.X);
-    Equal(1440, request.Y);
-    Equal(file, request.Files.Single());
-}
-
 static void RejectsTooManyFiles()
 {
     using var workspace = TestWorkspace.Create();
@@ -105,10 +60,119 @@ static void PromptNamesSelectedFiles()
     using var workspace = TestWorkspace.Create("附件目录");
     var one = workspace.File("ui.png");
     var two = workspace.File("witch_icon.png");
-    var prompt = AcpClient.BuildPromptText("这两个相同吗？", [one, two]);
+    var prompt = TaskPromptText.Build("这两个相同吗？", [one, two]);
     if (!prompt.StartsWith("这两个相同吗？", StringComparison.Ordinal)) throw new Exception("Original task text was changed.");
     if (!prompt.Contains(one, StringComparison.Ordinal) || !prompt.Contains(two, StringComparison.Ordinal))
         throw new Exception("Selected file paths are missing from the ACP text fallback.");
+}
+
+static void FramesDesktopActivation()
+{
+    using var workspace = TestWorkspace.Create("协议 工作区");
+    var file = workspace.File("示例 file.txt");
+    const string prompt = "检查这些文件，不要改写输入。";
+    var frame = DesktopActivationProtocol.EncodeRequest(
+        "request-1",
+        "run",
+        new string('a', 64),
+        workspace.Path,
+        prompt,
+        [file]);
+    Equal(frame.Length - 4, BinaryPrimitives.ReadInt32LittleEndian(frame));
+    using var document = JsonDocument.Parse(frame.AsMemory(4));
+    var root = document.RootElement;
+    Equal(DesktopActivationProtocol.Version, root.GetProperty("protocolVersion").GetInt32());
+    Equal(prompt, root.GetProperty("prompt").GetString());
+    Equal(file, root.GetProperty("files")[0].GetString());
+}
+
+static void BuildsPrivateDesktopLaunchArguments()
+{
+    using var workspace = TestWorkspace.Create("Desktop workspace");
+    var cli = workspace.File("goose.exe");
+    var desktop = workspace.File("Goose.exe");
+    const string privatePrompt = "private prompt that must not be in process arguments";
+    var privateFile = workspace.File("private file.txt");
+    var startInfo = new GooseInstallation(cli, desktop).CreateDesktopStartInfo(forLauncherActivation: true);
+    Equal(desktop, startInfo.FileName);
+    Equal(true, startInfo.UseShellExecute);
+    Equal(1, startInfo.ArgumentList.Count);
+    Equal("--launcher-activation", startInfo.ArgumentList[0]);
+    if (startInfo.ArgumentList.Any(value => value.Contains(privatePrompt, StringComparison.Ordinal) || value.Contains(privateFile, StringComparison.Ordinal)))
+        throw new Exception("Desktop process arguments contain task data.");
+}
+
+static void ActivatesDesktopOverUserPipe() => ActivatesDesktopOverUserPipeAsync().GetAwaiter().GetResult();
+
+static async Task ActivatesDesktopOverUserPipeAsync()
+{
+    using var workspace = TestWorkspace.Create("activation client");
+    var endpointPath = System.IO.Path.Combine(workspace.Path, "desktop-activation.json");
+    var pipeName = $"GooseLauncher.Tests.{Guid.NewGuid():N}";
+    var authToken = new string('b', 64);
+    var cli = workspace.File("goose.exe");
+    var desktop = workspace.File("Goose.exe");
+    var selectedFile = workspace.File("示例.txt");
+    const string prompt = "读取这个文件";
+    var endpoint = new DesktopActivationEndpoint(DesktopActivationProtocol.Version, Environment.ProcessId, $@"\\.\pipe\{pipeName}", authToken);
+    File.WriteAllText(endpointPath, JsonSerializer.Serialize(endpoint, DesktopActivationProtocol.JsonOptions));
+
+    string? receivedPrompt = null;
+    string? receivedFile = null;
+    var serverTask = Task.Run(async () =>
+    {
+        for (var requestIndex = 0; requestIndex < 2; requestIndex++)
+        {
+            await using var server = new NamedPipeServerStream(
+                pipeName,
+                PipeDirection.InOut,
+                1,
+                PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            await server.WaitForConnectionAsync();
+            var header = new byte[4];
+            await server.ReadExactlyAsync(header);
+            var length = BinaryPrimitives.ReadInt32LittleEndian(header);
+            var payload = new byte[length];
+            await server.ReadExactlyAsync(payload);
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            var requestId = root.GetProperty("requestId").GetString()!;
+            var action = root.GetProperty("action").GetString();
+            DesktopActivationResponse response;
+            if (action == "capabilities")
+            {
+                response = new DesktopActivationResponse(
+                    DesktopActivationProtocol.Version,
+                    requestId,
+                    "accepted",
+                    Capabilities: new DesktopActivationCapabilities(
+                        ["ping", "capabilities", "run", "open"],
+                        DesktopActivationProtocol.MaxPayloadBytes,
+                        64 * 1024,
+                        ActivationRequest.MaxFiles));
+            }
+            else
+            {
+                receivedPrompt = root.GetProperty("prompt").GetString();
+                receivedFile = root.GetProperty("files")[0].GetString();
+                response = new DesktopActivationResponse(DesktopActivationProtocol.Version, requestId, "accepted");
+            }
+
+            var responsePayload = JsonSerializer.SerializeToUtf8Bytes(response, DesktopActivationProtocol.JsonOptions);
+            var responseFrame = new byte[responsePayload.Length + 4];
+            BinaryPrimitives.WriteInt32LittleEndian(responseFrame, responsePayload.Length);
+            responsePayload.CopyTo(responseFrame.AsSpan(4));
+            await server.WriteAsync(responseFrame);
+            await server.FlushAsync();
+        }
+    });
+
+    var client = new DesktopActivationClient(endpointPath, _ => throw new Exception("Desktop should already be reachable."));
+    await client.RunAsync(new GooseInstallation(cli, desktop), workspace.Path, prompt, [selectedFile]);
+    await serverTask;
+    Equal(prompt, receivedPrompt);
+    Equal(selectedFile, receivedFile);
 }
 
 static void LocatesExplicitCli()

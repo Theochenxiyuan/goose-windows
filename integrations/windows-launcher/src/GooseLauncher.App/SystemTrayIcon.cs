@@ -62,7 +62,7 @@ internal sealed class SystemTrayIcon : IDisposable
         if (RegisterClassEx(ref windowClass) == 0)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to register the tray window class.");
 
-        _windowHandle = CreateWindowEx(0, _windowClassName, "Goose Launcher Tray", 0, 0, 0, 0, 0,
+        _windowHandle = CreateWindowEx(0, _windowClassName, "Goose Tray", 0, 0, 0, 0, 0,
             nint.Zero, nint.Zero, module, nint.Zero);
         if (_windowHandle == nint.Zero)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to create the tray message window.");
@@ -123,8 +123,8 @@ internal sealed class SystemTrayIcon : IDisposable
         CallbackMessage = TrayCallbackMessage,
         IconHandle = _iconHandle,
         Tip = _busy
-            ? Strings.Get("Goose Launcher · 正在运行", "Goose Launcher · Running")
-            : Strings.Get("Goose Launcher · 就绪", "Goose Launcher · Ready"),
+            ? Strings.Get("Goose · 正在打开", "Goose · Opening")
+            : Strings.Get("Goose · 就绪", "Goose · Ready"),
         Info = string.Empty,
         InfoTitle = string.Empty,
     };
@@ -167,7 +167,7 @@ internal sealed class SystemTrayIcon : IDisposable
             AppendMenu(menu, MenuString, MenuOpenCli, Strings.Get("打开 Goose CLI", "Open Goose CLI"));
             AppendMenu(menu, MenuString, MenuSettings, Strings.Get("设置", "Settings"));
             AppendMenu(menu, MenuSeparator, 0, null);
-            AppendMenu(menu, MenuString, MenuExit, Strings.Get("退出", "Exit"));
+            AppendMenu(menu, MenuString, MenuExit, Strings.Get("退出 Goose", "Exit Goose"));
             SetMenuDefaultItem(menu, MenuOpenGoose, false);
             GetCursorPos(out var cursor);
             SetForegroundWindow(_windowHandle);

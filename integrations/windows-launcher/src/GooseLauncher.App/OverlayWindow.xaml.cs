@@ -29,18 +29,14 @@ public sealed partial class OverlayWindow : Window
 
     private readonly nint _windowHandle;
     private ActivationRequest _activation = ActivationRequest.Create(Environment.CurrentDirectory);
-    private AcpClient? _client;
+    private CancellationTokenSource? _runCancellation;
     private bool _running;
-    private bool _handedOff;
     private bool _hasActivationContext;
-    private bool _resetClientWhenIdle;
     private bool _allowClose;
     private uint _currentDpi = 96;
     private uint? _movePointerId;
     private NativePoint _moveStartCursor;
     private Windows.Graphics.PointInt32 _moveStartPosition;
-    private TaskCompletionSource<AcpPermissionDecision>? _permissionCompletion;
-    private AcpPermissionRequest? _permissionRequest;
 
     internal string CurrentFolderForLaunch => _hasActivationContext
         ? _activation.Folder
@@ -138,7 +134,7 @@ public sealed partial class OverlayWindow : Window
                 GooseProcessLauncher.OpenTerminal(
                     installation,
                     _activation.Folder,
-                    AcpClient.BuildPromptText(prompt, _activation.Files));
+                    TaskPromptText.Build(prompt, _activation.Files));
                 AppWindow.Hide();
                 await CompleteRunAsync();
             }
@@ -149,107 +145,39 @@ public sealed partial class OverlayWindow : Window
             return;
         }
 
-        if (_client is null)
-        {
-            _client = new AcpClient(installation);
-            _client.DiagnosticReceived += message => DispatcherQueue.TryEnqueue(() => SetDiagnostic(message));
-            _client.PermissionRequested += RequestPermissionAsync;
-        }
-
+        using var cancellation = new CancellationTokenSource();
+        _runCancellation = cancellation;
         try
         {
-            var sessionId = await _client.NewSessionAsync(_activation.Folder);
-            var promptTask = await _client.StartPromptAsync(prompt, _activation.Files);
-
-            GooseProcessLauncher.OpenDesktop(installation, $"goose://resume/{Uri.EscapeDataString(sessionId)}");
-            _handedOff = true;
+            await new DesktopActivationClient().RunAsync(
+                installation,
+                _activation.Folder,
+                prompt,
+                _activation.Files,
+                cancellation.Token);
             AppWindow.Hide();
-
-            await promptTask;
             await CompleteRunAsync();
         }
         catch (OperationCanceledException)
         {
-            if (_handedOff) await CompleteRunAsync();
-            else SetSubmitting(false);
+            SetSubmitting(false);
         }
         catch (Exception error)
         {
-            if (_handedOff)
-            {
-                App.Instance?.ShowNotification(
-                    Strings.Get("Goose 任务失败", "Goose task failed"),
-                    error.Message);
-                await CompleteRunAsync();
-            }
-            else
-            {
-                if (_client is not null)
-                {
-                    try { await _client.CancelAsync(); }
-                    catch { }
-                }
-                SetError(error.Message);
-            }
+            SetError(error.Message);
+        }
+        finally
+        {
+            if (ReferenceEquals(_runCancellation, cancellation)) _runCancellation = null;
         }
     }
 
-    private async Task CompleteRunAsync()
+    private Task CompleteRunAsync()
     {
         _running = false;
-        _handedOff = false;
         PromptTextBox.Text = string.Empty;
         SetSubmitting(false);
-        if (_resetClientWhenIdle)
-        {
-            _resetClientWhenIdle = false;
-            await DisposeClientAsync();
-        }
-    }
-
-    private Task<AcpPermissionDecision> RequestPermissionAsync(AcpPermissionRequest request)
-    {
-        var completion = new TaskCompletionSource<AcpPermissionDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!DispatcherQueue.TryEnqueue(() =>
-        {
-            _permissionRequest = request;
-            _permissionCompletion = completion;
-            PermissionTextBlock.Text = string.IsNullOrWhiteSpace(request.Title)
-                ? Strings.Get("Goose 请求运行工具", "Goose requests permission to run a tool")
-                : request.Title;
-            PermissionPanel.Visibility = Visibility.Visible;
-            ShowTopmost();
-            AllowButton.Focus(FocusState.Programmatic);
-        }))
-        {
-            completion.TrySetResult(AcpPermissionDecision.Cancelled);
-        }
-
-        return completion.Task;
-    }
-
-    private void Allow_Click(object sender, RoutedEventArgs e) => CompletePermission(allow: true);
-
-    private void Deny_Click(object sender, RoutedEventArgs e) => CompletePermission(allow: false);
-
-    private void CompletePermission(bool allow)
-    {
-        if (_permissionCompletion is null) return;
-
-        var options = _permissionRequest?.Options ?? [];
-        var option = allow
-            ? options.FirstOrDefault(value => value.Kind.Contains("allow", StringComparison.OrdinalIgnoreCase)) ?? options.FirstOrDefault()
-            : options.FirstOrDefault(value =>
-                value.Kind.Contains("reject", StringComparison.OrdinalIgnoreCase) ||
-                value.Kind.Contains("deny", StringComparison.OrdinalIgnoreCase));
-
-        _permissionCompletion.TrySetResult(option is null
-            ? AcpPermissionDecision.Cancelled
-            : new AcpPermissionDecision(option.Id));
-        _permissionCompletion = null;
-        _permissionRequest = null;
-        PermissionPanel.Visibility = Visibility.Collapsed;
-        if (_handedOff) AppWindow.Hide();
+        return Task.CompletedTask;
     }
 
     private void SetSubmitting(bool submitting)
@@ -271,7 +199,7 @@ public sealed partial class OverlayWindow : Window
 
     internal void SetDiagnostic(string message)
     {
-        if (_running && !_handedOff && !string.IsNullOrWhiteSpace(message)) HintTextBlock.Text = message;
+        if (_running && !string.IsNullOrWhiteSpace(message)) HintTextBlock.Text = message;
     }
 
     private void SetError(string message)
@@ -299,7 +227,7 @@ public sealed partial class OverlayWindow : Window
             {
                 if (installation.DesktopPath is null)
                     throw new FileNotFoundException(Strings.Get("Goose Desktop 未找到。", "Goose Desktop was not found."));
-                GooseProcessLauncher.OpenDesktop(installation, "goose://new-session");
+                GooseProcessLauncher.OpenDesktop(installation);
             }
             else
             {
@@ -439,8 +367,6 @@ public sealed partial class OverlayWindow : Window
         RunButton.Content = Strings.Get("运行", "Run");
         CloseButton.Content = Strings.Get("关闭", "Close");
         OpenSettingsButton.Content = Strings.Get("设置", "Settings");
-        AllowButton.Content = Strings.Get("允许", "Allow");
-        DenyButton.Content = Strings.Get("拒绝", "Deny");
         HintTextBlock.Text = GetDefaultHint();
         UpdateOpenTargetButton();
     }
@@ -457,49 +383,28 @@ public sealed partial class OverlayWindow : Window
             "Enter 运行 · Shift/Ctrl+Enter 换行 · Esc 关闭",
             "Enter to run · Shift/Ctrl+Enter for newline · Esc to close");
 
-    public async ValueTask DisposeSessionAsync()
+    public ValueTask DisposeSessionAsync()
     {
-        _permissionCompletion?.TrySetResult(AcpPermissionDecision.Cancelled);
-        _permissionCompletion = null;
-        if (_running && _client is not null)
-        {
-            try { await _client.CancelAsync(); }
-            catch { }
-        }
-        await DisposeClientAsync();
+        _runCancellation?.Cancel();
+        return ValueTask.CompletedTask;
     }
 
-    private async Task DisposeClientAsync()
-    {
-        if (_client is not null)
-        {
-            await _client.DisposeAsync();
-            _client = null;
-        }
-    }
-
-    internal async Task OnSettingsChangedAsync()
+    internal Task OnSettingsChangedAsync()
     {
         UpdateOpenTargetButton();
-        if (_running)
-        {
-            _resetClientWhenIdle = true;
-            return;
-        }
-        await DisposeClientAsync();
+        return Task.CompletedTask;
     }
 
-    private async Task HideOverlayAsync()
+    private Task HideOverlayAsync()
     {
-        CompletePermission(allow: false);
-        if (_running && !_handedOff && _client is not null)
+        if (_running)
         {
-            try { await _client.CancelAsync(); }
-            catch { }
+            _runCancellation?.Cancel();
             _running = false;
             SetSubmitting(false);
         }
         AppWindow.Hide();
+        return Task.CompletedTask;
     }
 
     internal void CloseForExit()

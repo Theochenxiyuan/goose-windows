@@ -92,22 +92,9 @@ public partial class App : Application
     {
         try
         {
-            var uriText = args.FirstOrDefault(value => value.StartsWith("goosecompanion:", StringComparison.OrdinalIgnoreCase));
-            if (uriText is not null)
-            {
-                var uri = new Uri(uriText);
-                return uri.Host.Equals("show", StringComparison.OrdinalIgnoreCase)
-                    ? ActivationRequest.FromProtocolUri(uri)
-                    : null;
-            }
-
             var folderIndex = Array.FindIndex(args, value => value.Equals("--folder", StringComparison.OrdinalIgnoreCase));
             if (folderIndex >= 0 && folderIndex + 1 < args.Length)
-            {
-                var fileIndex = Array.FindIndex(args, value => value.Equals("--files", StringComparison.OrdinalIgnoreCase));
-                var files = fileIndex >= 0 ? args.Skip(fileIndex + 1).ToArray() : [];
-                return ActivationRequest.Create(args[folderIndex + 1], files: files);
-            }
+                return ActivationRequest.Create(args[folderIndex + 1]);
         }
         catch
         {
@@ -146,7 +133,7 @@ public partial class App : Application
                 ?? throw new FileNotFoundException(Strings.Get("Goose CLI 未找到。", "Goose CLI was not found."));
             if (installation.DesktopPath is null)
                 throw new FileNotFoundException(Strings.Get("Goose Desktop 未找到。", "Goose Desktop was not found."));
-            GooseProcessLauncher.OpenDesktop(installation, "goose://new-session");
+            GooseProcessLauncher.OpenDesktop(installation);
         }
         catch (Exception error)
         {

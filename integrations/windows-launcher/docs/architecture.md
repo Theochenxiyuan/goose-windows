@@ -1,27 +1,26 @@
-# Architecture and compatibility notes
+# Windows integration architecture
 
-## Layers
+## Process ownership
 
-1. **Explorer activation**: packaged `IExplorerCommand` resolves a directory, directory background, or up to eight files with one shared parent. It captures the pointer position, attempts the current-user named pipe, then uses `goosecompanion://show` for cold start.
-2. **Companion shell**: one resident WinUI 3 process owns a notification-area icon, a pre-created input overlay, protocol parsing, and the pipe listener. Overlay close/Esc only hides the window; tray Exit owns application shutdown. The tray can open either Goose Desktop or an interactive Goose CLI session, and the overlay exposes the configured task target without submitting a task.
-3. **Run targets**: Desktop mode uses the ACP bridge to create and run a durable Goose session before opening it in Goose Desktop. Terminal mode launches `goose run --text ... --interactive` directly with the same cwd and selected-file context, leaving presentation to the configured default Windows terminal.
-4. **Goose Desktop**: remains the owner of providers, credentials, extensions, policy, persistent conversations, and full UI.
+1. **Explorer command** resolves the selected folder or up to eight sibling files. It sends the context to the resident Launcher pipe. On cold start it launches the sibling `GooseLauncher.exe` without task data, waits for readiness, and then sends the same pipe frame.
+2. **Launcher host** is one process per Windows user. It owns the pre-warmed overlay, Explorer activation listener, native Goose tray, startup registration, and Launcher-only settings.
+3. **Goose Desktop** hosts a private activation broker. A `run` request always creates a new Desktop window, backend lease, and session with the requested cwd and an auto-submitted initial message.
+4. **Goose renderer/backend** keeps its existing ACP WebSocket path, so agent chunks, tool cards, permission requests, cancellation, and errors remain native Desktop behavior from the first response chunk.
 
-## Deliberate boundaries
+Terminal mode is independent: it launches the bundled Goose CLI with the selected cwd. Because the established CLI mode uses `goose run --text`, its task text is visible in that CLI process command line; Desktop-mode privacy guarantees do not rely on that path.
 
-There is no model/provider UI, worker runtime, attachment parser, chat history store, Markdown client, task queue, diff/backup system, or custom permission policy here. Selected files are sent as ACP resource links and a concise text context; Goose performs the work.
+## Desktop activation protocol
 
-The Companion settings surface is intentionally limited to Goose CLI/Desktop executable overrides, Desktop versus Terminal task target, and start-with-Windows registration. It is stored under `%LOCALAPPDATA%\GooseLauncher`; it never stores provider, model, credential, extension, or permission-policy settings. Blank executable fields use automatic discovery.
+The endpoint metadata is stored below `%LOCALAPPDATA%\Goose\launcher` and contains a randomized named-pipe endpoint, protocol version, process id, and per-process authentication token. The user-profile ACL, non-global randomized endpoint, Node pipe permissions, and authentication token jointly restrict activation to the current user.
 
-Start-with-Windows is a per-user Run entry that activates `goosecompanion://tray`, avoiding a version-specific path into an installed MSIX. Startup creates the tray and pre-warms the hidden overlay without presenting a task window.
+Frames use a four-byte little-endian payload length followed by UTF-8 JSON. Version 1 supports `ping`, `capabilities`, `run`, and `open`. Requests include `protocolVersion`, `requestId`, `action`, `cwd`, `prompt`, `files`, and `bringToFront`; the authentication token is transport metadata. Payloads are limited to 256 KiB, prompts to 64 KiB, and files to eight sibling paths.
 
-## Compatibility risks
+The Desktop validates the protocol version, payload shape, directory, every file, and the authentication token. It caches acknowledgements by request id so a Launcher retry cannot create duplicate sessions. The Launcher hides the overlay only after an `accepted` acknowledgement.
 
-- Goose 1.42 accepts ACP v1 over stdio. The bridge accepts current snake_case update names and older camelCase aliases so it can tolerate nearby Goose releases.
-- Goose 1.42 only expands `file://` ACP resource links when the target decodes as text; binary files such as PNGs are otherwise omitted from the persisted user message. The Companion therefore mirrors every selected file's exact absolute path into the text prompt while retaining resource links for protocol-compatible agents. It does not infer model vision support or parse attachments itself.
-- ACP sessions are loadable by id, and Goose Desktop 1.36+ supports `goose://resume/<sessionId>`. The Launcher waits for `session/new` and for the prompt JSON-RPC request to be flushed before opening that route; it never opens an uncreated session.
-- The Companion ACP subprocess does not attach to Desktop's private in-memory `goose serve`; it writes the same durable Goose session store. This was verified on Goose 1.42: an ACP-created session appeared as `session_type: user` with the correct cwd and was resumable by Desktop. Opening it mid-turn is a UI hand-off, not an ownership transfer: the hidden Companion still owns that turn and permission requests temporarily reopen its native confirmation panel. A future true live takeover requires a small, public Desktop activation/ACP broker API; merely copying Launcher sources into a Goose fork would not provide it.
-- The resident process currently runs one Desktop-mode ACP turn at a time. A second Explorer activation while that turn is active reports the busy state through the tray instead of starting a competing session. Terminal-mode tasks are owned by their terminal process and do not keep the overlay busy.
-- The native shell extension is present and registered by the MSIX manifest, but its build requires MSVC v143 and a Windows 10/11 SDK. The managed vertical slice builds with the .NET SDK alone.
-- The pipe is restricted to the current Windows user, validates length-prefixed payloads, and bounds file count. Cold activation is length-bounded to avoid oversized URI invocation.
-- WinUI 3 provides native IME and high-contrast behavior. The app declares Per-Monitor V2 awareness, uses physical-pixel `AppWindow` positioning, and constrains custom drag/resize to the target monitor work area; cross-monitor behavior still needs physical multi-monitor QA.
+No prompt or selected-file path is placed in a Desktop command line, Goose URI, or diagnostic log. The only cold-start argument is `--launcher-activation`.
+
+## Lifecycle boundaries
+
+Closing the overlay never exits the Launcher. Closing all Desktop windows follows Goose Desktop's Windows lifecycle and exits Desktop while the Launcher remains available. The Launcher does not interpret Desktop turn state; safe handling of closing a window with a running turn is a separate Desktop lifecycle phase.
+
+On Windows the Electron tray and its setting are disabled. The native Launcher tray is therefore the product's only Goose notification-area icon.

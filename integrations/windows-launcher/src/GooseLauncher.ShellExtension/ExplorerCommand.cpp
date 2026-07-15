@@ -17,7 +17,6 @@ namespace
 {
     constexpr DWORD MaxFiles = 8;
     constexpr DWORD PipeTimeoutMs = 700;
-    constexpr size_t MaxColdUriChars = 7600;
 
     bool IsChineseUi() noexcept { return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE; }
 
@@ -132,19 +131,24 @@ namespace
         return CallNamedPipeW(pipeName.c_str(), framed.data(), static_cast<DWORD>(framed.size()), &ack, sizeof(ack), &read, PipeTimeoutMs) && read == 1 && ack == 1;
     }
 
-    std::wstring EscapeUriValue(const std::wstring& value)
+    bool StartLauncherHost()
     {
-        DWORD capacity = static_cast<DWORD>(value.size() * 9 + 1); std::vector<wchar_t> escaped(capacity);
-        if (FAILED(UrlEscapeW(value.c_str(), escaped.data(), &capacity, URL_ESCAPE_AS_UTF8 | URL_ESCAPE_SEGMENT_ONLY))) return {};
-        return escaped.data();
+        wchar_t path[MAX_PATH]{};
+        if (!g_moduleInstance || !GetModuleFileNameW(g_moduleInstance, path, ARRAYSIZE(path))) return false;
+        if (!PathRemoveFileSpecW(path) || !PathAppendW(path, L"GooseLauncher.exe")) return false;
+        if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return false;
+        return reinterpret_cast<INT_PTR>(ShellExecuteW(
+            nullptr, L"open", path, L"--tray", nullptr, SW_SHOWNORMAL)) > 32;
     }
 
     void ActivateCold(const std::wstring& folder, const std::vector<std::wstring>& files, const POINT cursor)
     {
-        const auto escapedFolder = EscapeUriValue(folder); if (escapedFolder.empty()) return;
-        const auto filesQuery = files.empty() ? std::wstring{} : L"&files=" + EscapeUriValue(SerializeFiles(files));
-        const auto uri = L"goosecompanion://show?folder=" + escapedFolder + filesQuery + L"&x=" + std::to_wstring(cursor.x) + L"&y=" + std::to_wstring(cursor.y);
-        if (uri.size() <= MaxColdUriChars) ShellExecuteW(nullptr, L"open", uri.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (!StartLauncherHost()) return;
+        for (int attempt = 0; attempt < 30; ++attempt)
+        {
+            Sleep(100);
+            if (SendWarmActivation(folder, files, cursor)) return;
+        }
     }
 }
 

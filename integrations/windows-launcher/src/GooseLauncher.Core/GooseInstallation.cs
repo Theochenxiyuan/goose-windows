@@ -12,9 +12,12 @@ public sealed record GooseInstallation(string CliPath, string? DesktopPath)
 
         var configuredDesktop = NormalizeOverride(desktopOverride);
         var desktopOverrideIsValid = configuredDesktop is not null && File.Exists(configuredDesktop);
+        var bundledDesktop = Path.Combine(AppContext.BaseDirectory, "Goose.exe");
+        var bundledCli = Path.Combine(AppContext.BaseDirectory, "resources", "bin", "goose.exe");
         var desktopCandidates = new[]
         {
             desktopOverrideIsValid ? configuredDesktop : null,
+            configuredDesktop is null ? bundledDesktop : null,
             configuredDesktop is null ? FindDesktopFromProtocol() : null,
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Goose", "Goose.exe"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Goose", "Goose.exe"),
@@ -28,6 +31,7 @@ public sealed record GooseInstallation(string CliPath, string? DesktopPath)
         {
             configuredCli,
             configuredDesktopCli,
+            bundledCli,
             explicitCli,
             FindOnPath("goose.exe"),
             FindOnPath("goose"),
@@ -52,17 +56,13 @@ public sealed record GooseInstallation(string CliPath, string? DesktopPath)
         catch { return path.Trim(); }
     }
 
-    public ProcessStartInfo CreateAcpStartInfo() => new(CliPath, "acp")
+    public ProcessStartInfo CreateDesktopStartInfo(bool forLauncherActivation = false)
     {
-        UseShellExecute = false,
-        CreateNoWindow = true,
-        RedirectStandardInput = true,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        StandardInputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-        StandardOutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-        StandardErrorEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-    };
+        if (DesktopPath is null) throw new FileNotFoundException("Goose Desktop was not found.");
+        var startInfo = new ProcessStartInfo(DesktopPath) { UseShellExecute = true };
+        if (forLauncherActivation) startInfo.ArgumentList.Add("--launcher-activation");
+        return startInfo;
+    }
 
     public ProcessStartInfo CreateInteractiveRunStartInfo(string cwd, string prompt)
     {

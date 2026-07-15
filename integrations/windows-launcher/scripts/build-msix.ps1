@@ -92,7 +92,7 @@ Invoke-Checked 'dotnet' @(
 )
 Copy-Item -Path (Join-Path $publishDir '*') -Destination $stageDir -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot 'src\GooseLauncher.ShellExtension\x64\Release\GooseLauncher.ShellExtension.dll') -Destination $stageDir -Force
-Remove-Item -LiteralPath (Join-Path $stageDir 'GooseLauncher.App.pdb') -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path $stageDir 'GooseLauncher.pdb') -Force -ErrorAction SilentlyContinue
 
 $assets = Join-Path $stageDir 'Assets'
 New-Item -ItemType Directory -Path $assets -Force | Out-Null
@@ -161,7 +161,7 @@ if ($Install) {
         $elevated = Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', $encodedCommand -WindowStyle Hidden -Wait -PassThru
         if ($elevated.ExitCode -ne 0) { throw "Development certificate installation failed with exit code $($elevated.ExitCode)" }
     }
-    Get-Process -Name 'GooseLauncher.App' -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process -Name 'GooseLauncher' -ErrorAction SilentlyContinue | Stop-Process -Force
     Get-AppxPackage -Name 'GooseLauncher' -ErrorAction SilentlyContinue | Remove-AppxPackage
     Add-AppxPackage -Path $packagePath
     if ($RestartExplorer) {
