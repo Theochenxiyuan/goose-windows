@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace GooseLauncher.Core;
 
@@ -27,7 +28,10 @@ internal static class DesktopActivationProtocol
 {
     internal const int Version = 1;
     internal const int MaxPayloadBytes = 256 * 1024;
-    internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
 
     internal static byte[] EncodeRequest(
         string requestId,

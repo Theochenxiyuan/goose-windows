@@ -10,6 +10,7 @@ var tests = new (string Name, Action Run)[]
     ("activation rejects too many files", RejectsTooManyFiles),
     ("task prompt text names selected files", PromptNamesSelectedFiles),
     ("Desktop activation frames preserve Unicode inputs", FramesDesktopActivation),
+    ("Desktop capabilities frames omit absent run fields", FramesDesktopCapabilities),
     ("Desktop activation client completes capabilities and run handshake", ActivatesDesktopOverUserPipe),
     ("Desktop cold start contains no task data", BuildsPrivateDesktopLaunchArguments),
     ("Goose locator honors explicit CLI path", LocatesExplicitCli),
@@ -84,6 +85,18 @@ static void FramesDesktopActivation()
     Equal(DesktopActivationProtocol.Version, root.GetProperty("protocolVersion").GetInt32());
     Equal(prompt, root.GetProperty("prompt").GetString());
     Equal(file, root.GetProperty("files")[0].GetString());
+}
+
+static void FramesDesktopCapabilities()
+{
+    var frame = DesktopActivationProtocol.EncodeRequest(
+        "request-1",
+        "capabilities",
+        new string('a', 64));
+    using var document = JsonDocument.Parse(frame.AsMemory(4));
+    var root = document.RootElement;
+    if (root.TryGetProperty("cwd", out _)) throw new Exception("Capabilities request contains a null cwd.");
+    if (root.TryGetProperty("prompt", out _)) throw new Exception("Capabilities request contains a null prompt.");
 }
 
 static void BuildsPrivateDesktopLaunchArguments()
