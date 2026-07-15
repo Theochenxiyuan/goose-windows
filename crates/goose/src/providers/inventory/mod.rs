@@ -880,20 +880,35 @@ pub fn default_inventory_identity(
     identity
 }
 
-pub fn default_inventory_configured(config_keys: &[ConfigKey], config: &Config) -> bool {
-    config_keys.iter().all(|key| {
-        if !key.required {
+pub fn default_inventory_configured(
+    provider_id: &str,
+    config_keys: &[ConfigKey],
+    config: &Config,
+) -> bool {
+    if let Some(entry) = crate::config::get_provider_entry(config, provider_id) {
+        if !entry.enabled || !entry.configured {
+            return false;
+        }
+        if config_keys.is_empty() {
             return true;
         }
-        if key.default.is_some() {
-            return true;
-        }
-        if key.secret {
+    }
+
+    let mut has_explicit_input = false;
+    for key in config_keys {
+        let is_set = if key.secret {
             config.get_secret::<serde_json::Value>(&key.name).is_ok()
         } else {
             config.get_param::<serde_json::Value>(&key.name).is_ok()
+        };
+        has_explicit_input |= is_set;
+
+        if key.required && !is_set && key.default.is_none() {
+            return false;
         }
-    })
+    }
+
+    has_explicit_input
 }
 
 pub fn declarative_inventory_identity(
@@ -1221,6 +1236,104 @@ pub async fn create_tables_in_tx(tx: &mut Transaction<'_, Sqlite>) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn inventory_test_config() -> Config {
+        let config_file = tempfile::NamedTempFile::new().unwrap();
+        let secrets_file = tempfile::NamedTempFile::new().unwrap();
+        Config::new_with_file_secrets(config_file.path(), secrets_file.path()).unwrap()
+    }
+
+    #[test]
+    fn default_configured_requires_explicit_input_when_defaults_exist() {
+        let config = inventory_test_config();
+        let keys = [ConfigKey::new(
+            "TEST_PROVIDER_COMMAND",
+            true,
+            false,
+            Some("test-provider"),
+            true,
+        )];
+
+        assert!(!default_inventory_configured(
+            "test_provider",
+            &keys,
+            &config
+        ));
+
+        config
+            .set_param("TEST_PROVIDER_COMMAND", "test-provider")
+            .unwrap();
+        assert!(default_inventory_configured(
+            "test_provider",
+            &keys,
+            &config
+        ));
+
+        crate::config::set_provider_configured(&config, "test_provider", false).unwrap();
+        assert!(!default_inventory_configured(
+            "test_provider",
+            &keys,
+            &config
+        ));
+    }
+
+    #[test]
+    fn default_configured_requires_explicit_input_for_optional_local_host() {
+        let config = inventory_test_config();
+        let keys = [ConfigKey::new(
+            "TEST_LOCAL_HOST",
+            false,
+            false,
+            Some("http://localhost:1234"),
+            true,
+        )];
+
+        assert!(!default_inventory_configured(
+            "test_provider",
+            &keys,
+            &config
+        ));
+
+        config
+            .set_param("TEST_LOCAL_HOST", "http://localhost:1234")
+            .unwrap();
+        assert!(default_inventory_configured(
+            "test_provider",
+            &keys,
+            &config
+        ));
+    }
+
+    #[test]
+    fn default_configured_supports_explicit_enable_for_parameterless_provider() {
+        let config = inventory_test_config();
+
+        assert!(!default_inventory_configured("test_provider", &[], &config));
+
+        crate::config::set_provider_configured(&config, "test_provider", true).unwrap();
+        assert!(default_inventory_configured("test_provider", &[], &config));
+
+        crate::config::set_provider_configured(&config, "test_provider", false).unwrap();
+        assert!(!default_inventory_configured("test_provider", &[], &config));
+    }
+
+    #[test]
+    fn default_configured_requires_non_default_required_inputs() {
+        let config = inventory_test_config();
+        let keys = [
+            ConfigKey::new("TEST_REQUIRED_KEY", true, false, None, true),
+            ConfigKey::new("TEST_OPTIONAL_HOST", false, false, None, false),
+        ];
+
+        config
+            .set_param("TEST_OPTIONAL_HOST", "http://localhost:1234")
+            .unwrap();
+        assert!(!default_inventory_configured(
+            "test_provider",
+            &keys,
+            &config
+        ));
+    }
 
     fn test_identity(provider_id: &str, inventory_key: &str) -> InventoryIdentity {
         InventoryIdentity {

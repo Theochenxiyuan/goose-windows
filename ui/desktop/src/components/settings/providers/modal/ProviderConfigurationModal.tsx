@@ -115,6 +115,10 @@ const i18n = defineMessages({
     id: 'providerConfigurationModal.close',
     defaultMessage: 'Close',
   },
+  enableProvider: {
+    id: 'providerSetupActions.enableProvider',
+    defaultMessage: 'Enable Provider',
+  },
   huggingFaceOAuthDescription: {
     id: 'providerConfigurationModal.huggingFaceOAuthDescription',
     defaultMessage:
@@ -482,15 +486,23 @@ export default function ProviderConfigurationModal({
                 )}
               </div>
             ) : isExternalSetup && !showDeleteConfirmation ? (
-              <div className="w-full">
+              <div className="flex gap-2 justify-end">
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   onClick={handleCancel}
-                  className="w-full h-[60px] rounded-none border-t border-border-primary text-md hover:bg-background-secondary text-text-primary font-medium"
                 >
                   {intl.formatMessage(i18n.close)}
                 </Button>
+                {isConfigured ? (
+                  <Button variant="destructive" onClick={handleDelete}>
+                    {intl.formatMessage(i18n.removeConfiguration)}
+                  </Button>
+                ) : (
+                  <Button onClick={handleSubmitForm}>
+                    {intl.formatMessage(i18n.enableProvider)}
+                  </Button>
+                )}
               </div>
             ) : (
               <ProviderSetupActions

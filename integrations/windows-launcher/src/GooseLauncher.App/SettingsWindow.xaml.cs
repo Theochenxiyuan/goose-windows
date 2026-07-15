@@ -14,6 +14,7 @@ public sealed partial class SettingsWindow : Window
     public SettingsWindow()
     {
         InitializeComponent();
+        GooseBranding.ApplyIcon(AppWindow);
         AppWindow.Resize(new Windows.Graphics.SizeInt32(620, 430));
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {

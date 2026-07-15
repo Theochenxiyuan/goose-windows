@@ -51,6 +51,7 @@ public sealed partial class OverlayWindow : Window
         InitializeModelSelectors();
 
         _windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        GooseBranding.ApplyIcon(AppWindow);
         _currentDpi = GetDpiForWindow(_windowHandle);
         AppWindow.Resize(new Windows.Graphics.SizeInt32(Scale(DefaultWidth, _currentDpi), Scale(DefaultHeight, _currentDpi)));
 

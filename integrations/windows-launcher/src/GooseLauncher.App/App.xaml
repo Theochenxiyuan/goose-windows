@@ -7,6 +7,12 @@
       <ResourceDictionary.MergedDictionaries>
         <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
       </ResourceDictionary.MergedDictionaries>
+      <SolidColorBrush
+          x:Key="ComboBoxDropDownBackground"
+          Color="{ThemeResource SolidBackgroundFillColorBase}" />
+      <SolidColorBrush
+          x:Key="ComboBoxDropDownBorderBrush"
+          Color="{ThemeResource ControlStrokeColorDefault}" />
     </ResourceDictionary>
   </Application.Resources>
 </Application>

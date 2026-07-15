@@ -25,6 +25,9 @@ internal sealed class SystemTrayIcon : IDisposable
     private const uint TrackRightButton = 0x0002;
     private const uint TrackReturnCommand = 0x0100;
     private const uint TrackNoNotify = 0x0080;
+    private const uint ImageIcon = 1;
+    private const uint LoadFromFile = 0x0010;
+    private const uint LoadDefaultSize = 0x0040;
     private const uint MenuOpenGoose = 1002;
     private const uint MenuSettings = 1003;
     private const uint MenuExit = 1004;
@@ -67,7 +70,15 @@ internal sealed class SystemTrayIcon : IDisposable
         if (_windowHandle == nint.Zero)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to create the tray message window.");
 
-        _iconHandle = CreateGooseIcon(busy: false);
+        _iconHandle = LoadImage(
+            nint.Zero,
+            GooseBranding.IconPath,
+            ImageIcon,
+            0,
+            0,
+            LoadFromFile | LoadDefaultSize);
+        if (_iconHandle == nint.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to load the Goose tray icon.");
         _taskbarCreatedMessage = RegisterWindowMessage("TaskbarCreated");
         if (!AddIcon()) SetTimer(_windowHandle, RetryTimerId, 1000, nint.Zero);
     }
@@ -78,18 +89,8 @@ internal sealed class SystemTrayIcon : IDisposable
         _busy = busy;
         if (!_iconAdded) return;
 
-        var replacement = CreateGooseIcon(busy);
         var data = CreateNotificationData();
-        data.IconHandle = replacement;
-        if (ShellNotifyIcon(NotifyModify, ref data))
-        {
-            if (_iconHandle != nint.Zero) DestroyIcon(_iconHandle);
-            _iconHandle = replacement;
-        }
-        else if (replacement != nint.Zero)
-        {
-            DestroyIcon(replacement);
-        }
+        ShellNotifyIcon(NotifyModify, ref data);
     }
 
     internal void ShowNotification(string title, string message)
@@ -185,42 +186,6 @@ internal sealed class SystemTrayIcon : IDisposable
         finally { DestroyMenu(menu); }
     }
 
-    private static nint CreateGooseIcon(bool busy, int size = 32)
-    {
-        var maskStride = ((size + 15) / 16) * 2;
-        var andMask = new byte[maskStride * size];
-        var color = new byte[size * size * 4];
-        var background = busy ? ((byte)230, (byte)126, (byte)34) : ((byte)45, (byte)112, (byte)210);
-        for (var y = 0; y < size; y++)
-        {
-            for (var x = 0; x < size; x++)
-            {
-                var targetRow = size - 1 - y;
-                var offset = (targetRow * size + x) * 4;
-                var center = (size - 1) / 2d;
-                var dx = x - center;
-                var dy = y - center;
-                var radius = size * 0.46;
-                if (dx * dx + dy * dy > radius * radius)
-                {
-                    andMask[targetRow * maskStride + x / 8] |= (byte)(0x80 >> (x % 8));
-                    continue;
-                }
-
-                var distance = Math.Sqrt(dx * dx + dy * dy);
-                var ring = distance is >= 6.2 and <= 9.2 && !(dx > 4 && dy < -2);
-                var bar = x is >= 15 and <= 24 && y is >= 15 and <= 18;
-                var stem = x is >= 21 and <= 24 && y is >= 15 and <= 23;
-                var white = ring || bar || stem;
-                color[offset] = white ? (byte)255 : background.Item3;
-                color[offset + 1] = white ? (byte)255 : background.Item2;
-                color[offset + 2] = white ? (byte)255 : background.Item1;
-                color[offset + 3] = 255;
-            }
-        }
-        return CreateIcon(GetModuleHandle(null), size, size, 1, 32, andMask, color);
-    }
-
     private static string Limit(string value, int maximumLength) =>
         value.Length <= maximumLength ? value : value[..maximumLength];
 
@@ -291,7 +256,7 @@ internal sealed class SystemTrayIcon : IDisposable
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint window);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint DefWindowProc(nint window, uint message, nint wParam, nint lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterWindowMessage(string message);
-    [DllImport("user32.dll", SetLastError = true)] private static extern nint CreateIcon(nint instance, int width, int height, byte planes, byte bitsPerPixel, byte[] andBits, byte[] xorBits);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint LoadImage(nint instance, string name, uint type, int desiredWidth, int desiredHeight, uint load);
     [DllImport("user32.dll")] private static extern bool DestroyIcon(nint icon);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "Shell_NotifyIconW")] private static extern bool ShellNotifyIcon(uint message, ref NotificationIconData data);
     [DllImport("user32.dll")] private static extern nint CreatePopupMenu();
