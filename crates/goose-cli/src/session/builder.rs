@@ -101,6 +101,8 @@ pub struct SessionBuilderConfig {
     pub provider: Option<String>,
     /// Model override from CLI arguments
     pub model: Option<String>,
+    /// Thinking effort override from CLI arguments
+    pub thinking_effort: Option<goose_providers::thinking::ThinkingEffort>,
     /// Enable debug printing
     pub debug: bool,
     /// Maximum number of consecutive identical tool calls allowed
@@ -138,6 +140,7 @@ impl Default for SessionBuilderConfig {
             additional_system_prompt: None,
             provider: None,
             model: None,
+            thinking_effort: None,
             debug: false,
             max_tool_repetitions: None,
             max_turns: None,
@@ -266,7 +269,7 @@ fn resolve_provider_and_model(
             process::exit(1);
         });
 
-    let model_config = if session_config.resume
+    let mut model_config = if session_config.resume
         && saved_model_config
             .as_ref()
             .is_some_and(|mc| mc.model_name == model_name)
@@ -289,6 +292,10 @@ fn resolve_provider_and_model(
         }
         config
     };
+
+    if let Some(thinking_effort) = session_config.thinking_effort {
+        model_config = model_config.with_thinking_effort(thinking_effort);
+    }
 
     ResolvedProviderConfig {
         provider_name,
@@ -719,6 +726,7 @@ mod tests {
             additional_system_prompt: Some("Test prompt".to_string()),
             provider: None,
             model: None,
+            thinking_effort: None,
             debug: true,
             max_tool_repetitions: Some(5),
             max_turns: None,

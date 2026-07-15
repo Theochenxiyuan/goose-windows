@@ -1,10 +1,17 @@
-export const DESKTOP_ACTIVATION_PROTOCOL_VERSION = 1;
+export const DESKTOP_ACTIVATION_PROTOCOL_VERSION = 2;
 export const MAX_ACTIVATION_PAYLOAD_BYTES = 256 * 1024;
 export const MAX_ACTIVATION_PROMPT_LENGTH = 64 * 1024;
 export const MAX_ACTIVATION_FILES = 8;
 export const MAX_ACTIVATION_PATH_LENGTH = 32_767;
 
 export type DesktopActivationAction = 'ping' | 'capabilities' | 'run' | 'open';
+export type LauncherThinkingEffort = 'off' | 'low' | 'medium' | 'high' | 'max';
+
+export interface LauncherSessionSelection {
+  provider: string;
+  model: string;
+  thinkingEffort?: LauncherThinkingEffort;
+}
 
 export interface DesktopActivationRequest {
   protocolVersion: number;
@@ -15,6 +22,7 @@ export interface DesktopActivationRequest {
   prompt?: string;
   files: string[];
   bringToFront: boolean;
+  sessionSelection?: LauncherSessionSelection;
 }
 
 export interface DesktopActivationCapabilities {
@@ -22,6 +30,7 @@ export interface DesktopActivationCapabilities {
   maxPayloadBytes: number;
   maxPromptLength: number;
   maxFiles: number;
+  sessionSelection: boolean;
 }
 
 export interface DesktopActivationResponse {
@@ -81,6 +90,28 @@ function optionalString(
     );
   }
   return value;
+}
+
+function optionalSessionSelection(
+  record: Record<string, unknown>
+): LauncherSessionSelection | undefined {
+  const value = record.sessionSelection;
+  if (value === undefined) return undefined;
+  const selection = requireRecord(value);
+  const provider = requireString(selection, 'provider', 256);
+  const model = requireString(selection, 'model', 512);
+  const thinkingEffort = optionalString(selection, 'thinkingEffort', 16);
+  if (
+    thinkingEffort !== undefined &&
+    !['off', 'low', 'medium', 'high', 'max'].includes(thinkingEffort)
+  ) {
+    throw new DesktopActivationProtocolError('invalid_request', 'thinkingEffort is not supported.');
+  }
+  return {
+    provider,
+    model,
+    thinkingEffort: thinkingEffort as LauncherThinkingEffort | undefined,
+  };
 }
 
 export function parseDesktopActivationRequest(payload: Buffer): DesktopActivationRequest {
@@ -148,11 +179,18 @@ export function parseDesktopActivationRequest(payload: Buffer): DesktopActivatio
   if (typeof record.bringToFront !== 'boolean') {
     throw new DesktopActivationProtocolError('invalid_request', 'bringToFront must be a boolean.');
   }
+  const sessionSelection = optionalSessionSelection(record);
   if (action === 'run' && (!cwd || !prompt?.trim())) {
     throw new DesktopActivationProtocolError('invalid_request', 'run requires cwd and prompt.');
   }
   if (action !== 'run' && files.length > 0) {
     throw new DesktopActivationProtocolError('invalid_request', 'Only run accepts files.');
+  }
+  if (action !== 'run' && sessionSelection) {
+    throw new DesktopActivationProtocolError(
+      'invalid_request',
+      'Only run accepts sessionSelection.'
+    );
   }
 
   return {
@@ -164,6 +202,7 @@ export function parseDesktopActivationRequest(payload: Buffer): DesktopActivatio
     prompt,
     files,
     bringToFront: record.bringToFront,
+    sessionSelection,
   };
 }
 
@@ -214,5 +253,6 @@ export function desktopActivationCapabilities(): DesktopActivationCapabilities {
     maxPayloadBytes: MAX_ACTIVATION_PAYLOAD_BYTES,
     maxPromptLength: MAX_ACTIVATION_PROMPT_LENGTH,
     maxFiles: MAX_ACTIVATION_FILES,
+    sessionSelection: true,
   };
 }

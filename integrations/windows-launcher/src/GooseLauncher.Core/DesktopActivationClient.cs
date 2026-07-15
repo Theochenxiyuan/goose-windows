@@ -38,6 +38,7 @@ public sealed class DesktopActivationClient
         string cwd,
         string prompt,
         IReadOnlyList<string> files,
+        LauncherSessionSelection? sessionSelection = null,
         CancellationToken cancellationToken = default)
     {
         var requestId = Guid.NewGuid().ToString("D");
@@ -60,7 +61,8 @@ public sealed class DesktopActivationClient
                             endpoint.AuthToken,
                             Path.GetFullPath(cwd),
                             prompt,
-                            files.Select(Path.GetFullPath).ToArray()), timeout.Token);
+                            files.Select(Path.GetFullPath).ToArray(),
+                            sessionSelection: sessionSelection), timeout.Token);
                         ValidateAccepted(response, requestId);
                         return;
                     }
@@ -101,6 +103,8 @@ public sealed class DesktopActivationClient
         ValidateAccepted(response, requestId);
         if (response.Capabilities?.Actions.Contains("run", StringComparer.Ordinal) != true)
             throw new NotSupportedException("Goose Desktop does not support Launcher run activation.");
+        if (response.Capabilities?.SessionSelection != true)
+            throw new NotSupportedException("Goose Desktop does not support Launcher session selection.");
     }
 
     private async Task<DesktopActivationEndpoint?> TryReadEndpointAsync(CancellationToken cancellationToken)

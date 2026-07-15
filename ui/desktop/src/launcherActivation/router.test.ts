@@ -33,12 +33,22 @@ describe('Desktop activation routing', () => {
       prompt: '检查文件',
       files: [file],
       bringToFront: true,
+      sessionSelection: {
+        provider: 'chatgpt_codex',
+        model: 'gpt-5.4',
+        thinkingEffort: 'high',
+      },
     };
 
     await expect(router.route(request)).resolves.toMatchObject({ status: 'accepted' });
     expect(options).toMatchObject({
       dir: cwd,
       initialMessageNoAutoSubmit: false,
+      launcherSessionSelection: {
+        provider: 'chatgpt_codex',
+        model: 'gpt-5.4',
+        thinkingEffort: 'high',
+      },
     });
     expect(options?.initialMessage).toContain(file);
     expect(window.show).toHaveBeenCalledOnce();

@@ -32,10 +32,25 @@ public sealed record GooseInstallation(string CliPath, string DesktopPath)
         return startInfo;
     }
 
-    public ProcessStartInfo CreateInteractiveRunStartInfo(string cwd, string prompt)
+    public ProcessStartInfo CreateInteractiveRunStartInfo(
+        string cwd,
+        string prompt,
+        LauncherSessionSelection? sessionSelection = null)
     {
         var startInfo = CreateInteractiveStartInfo(cwd);
         startInfo.ArgumentList.Add("run");
+        if (sessionSelection is not null)
+        {
+            startInfo.ArgumentList.Add("--provider");
+            startInfo.ArgumentList.Add(sessionSelection.Provider);
+            startInfo.ArgumentList.Add("--model");
+            startInfo.ArgumentList.Add(sessionSelection.Model);
+            if (!string.IsNullOrWhiteSpace(sessionSelection.ThinkingEffort))
+            {
+                startInfo.ArgumentList.Add("--thinking-effort");
+                startInfo.ArgumentList.Add(sessionSelection.ThinkingEffort);
+            }
+        }
         startInfo.ArgumentList.Add("--text");
         startInfo.ArgumentList.Add(prompt);
         startInfo.ArgumentList.Add("--interactive");

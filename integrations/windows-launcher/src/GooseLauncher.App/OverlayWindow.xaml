@@ -81,11 +81,32 @@
 
       <Grid Grid.Row="1" RowSpacing="8">
         <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
+        <Grid x:Name="ModelSelectionPanel" ColumnSpacing="10">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <ComboBox
+              x:Name="ModelComboBox"
+              Header="Model"
+              HorizontalAlignment="Stretch"
+              DisplayMemberPath="Label"
+              SelectionChanged="ModelComboBox_SelectionChanged" />
+          <ComboBox
+              x:Name="ThinkingEffortComboBox"
+              Grid.Column="1"
+              Width="150"
+              Header="Reasoning effort"
+              DisplayMemberPath="Label"
+              Visibility="Collapsed" />
+        </Grid>
         <TextBox
             x:Name="PromptTextBox"
+            Grid.Row="1"
             MinHeight="82"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch"
@@ -102,7 +123,7 @@
             KeyDown="PromptTextBox_KeyDown" />
         <InfoBar
             x:Name="ErrorInfoBar"
-            Grid.Row="1"
+            Grid.Row="2"
             IsOpen="False"
             IsClosable="False"
             Severity="Error" />

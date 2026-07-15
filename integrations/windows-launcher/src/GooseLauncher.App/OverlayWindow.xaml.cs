@@ -13,11 +13,11 @@ namespace GooseLauncher.App;
 public sealed partial class OverlayWindow : Window
 {
     private const int DefaultWidth = 540;
-    private const int DefaultHeight = 360;
+    private const int DefaultHeight = 420;
     private const int MinimumWidth = 420;
-    private const int MinimumHeight = 300;
+    private const int MinimumHeight = 360;
     private const int MaximumWidth = 900;
-    private const int MaximumHeight = 520;
+    private const int MaximumHeight = 600;
     private const int ExtendedStyleIndex = -20;
     private const long ExtendedStyleToolWindow = 0x00000080L;
     private const long ExtendedStyleAppWindow = 0x00040000L;
@@ -37,6 +37,8 @@ public sealed partial class OverlayWindow : Window
     private uint? _movePointerId;
     private NativePoint _moveStartCursor;
     private Windows.Graphics.PointInt32 _moveStartPosition;
+    private int _launcherOptionsLoadVersion;
+    private LauncherOptionsCatalog? _launcherOptions;
 
     internal string CurrentFolderForLaunch => _hasActivationContext
         ? _activation.Folder
@@ -46,6 +48,7 @@ public sealed partial class OverlayWindow : Window
     {
         InitializeComponent();
         ApplyStrings();
+        InitializeModelSelectors();
 
         _windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _currentDpi = GetDpiForWindow(_windowHandle);
@@ -94,6 +97,7 @@ public sealed partial class OverlayWindow : Window
 
         if (contextChanged) PromptTextBox.Text = string.Empty;
         SetSubmitting(false);
+        _ = LoadLauncherOptionsAsync();
         PositionNearPointer(request.X, request.Y);
         ShowTopmost();
         DispatcherQueue.TryEnqueue(() => PromptTextBox.Focus(FocusState.Programmatic));
@@ -108,6 +112,7 @@ public sealed partial class OverlayWindow : Window
 
         var settings = CompanionSettingsStore.Load();
         var installation = GooseInstallation.Locate();
+        var sessionSelection = GetSessionSelection();
         if (installation is null)
         {
             SetError(Strings.Get(
@@ -126,7 +131,8 @@ public sealed partial class OverlayWindow : Window
                 GooseProcessLauncher.OpenTerminal(
                     installation,
                     _activation.Folder,
-                    TaskPromptText.Build(prompt, _activation.Files));
+                    TaskPromptText.Build(prompt, _activation.Files),
+                    sessionSelection);
                 AppWindow.Hide();
                 await CompleteRunAsync();
             }
@@ -146,6 +152,7 @@ public sealed partial class OverlayWindow : Window
                 _activation.Folder,
                 prompt,
                 _activation.Files,
+                sessionSelection,
                 cancellation.Token);
             AppWindow.Hide();
             await CompleteRunAsync();
@@ -176,6 +183,8 @@ public sealed partial class OverlayWindow : Window
     {
         _running = submitting;
         PromptTextBox.IsEnabled = !submitting;
+        ModelComboBox.IsEnabled = !submitting;
+        ThinkingEffortComboBox.IsEnabled = !submitting;
         CloseButton.IsEnabled = !submitting;
         OpenTargetButton.IsEnabled = !submitting;
         OpenSettingsButton.Visibility = Visibility.Collapsed;
@@ -234,6 +243,101 @@ public sealed partial class OverlayWindow : Window
     private async void Close_Click(object sender, RoutedEventArgs e) => await HideOverlayAsync();
 
     private void PromptTextBox_TextChanged(object sender, TextChangedEventArgs e) => UpdateRunButton();
+
+    private sealed record ModelChoice(
+        string Label,
+        string? Provider,
+        string? Model,
+        bool Reasoning);
+
+    private sealed record ThinkingEffortChoice(string Value, string Label);
+
+    private void InitializeModelSelectors()
+    {
+        ModelComboBox.ItemsSource = new[] { DefaultModelChoice() };
+        ModelComboBox.SelectedIndex = 0;
+        ThinkingEffortComboBox.ItemsSource = ThinkingEffortChoices();
+        ThinkingEffortComboBox.SelectedIndex = 0;
+    }
+
+    private ModelChoice DefaultModelChoice()
+    {
+        var suffix = _launcherOptions is { DefaultProvider: not null, DefaultModel: not null }
+            ? $" ({_launcherOptions.DefaultProvider}/{_launcherOptions.DefaultModel})"
+            : string.Empty;
+        return new ModelChoice(
+            Strings.Get("使用 Goose 默认设置", "Use Goose default") + suffix,
+            null,
+            null,
+            false);
+    }
+
+    private static IReadOnlyList<ThinkingEffortChoice> ThinkingEffortChoices() =>
+    [
+        new("off", Strings.Get("关闭", "Off")),
+        new("low", Strings.Get("低", "Low")),
+        new("medium", Strings.Get("中", "Medium")),
+        new("high", Strings.Get("高", "High")),
+        new("max", Strings.Get("最高", "Max")),
+    ];
+
+    private async Task LoadLauncherOptionsAsync()
+    {
+        var installation = GooseInstallation.Locate();
+        if (installation is null) return;
+
+        var loadVersion = ++_launcherOptionsLoadVersion;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        try
+        {
+            var catalog = await new LauncherOptionsClient().GetAsync(installation, timeout.Token);
+            if (loadVersion != _launcherOptionsLoadVersion) return;
+
+            var previous = ModelComboBox.SelectedItem as ModelChoice;
+            _launcherOptions = catalog;
+            ToolTipService.SetToolTip(ModelComboBox, null);
+            var choices = new List<ModelChoice> { DefaultModelChoice() };
+            choices.AddRange(catalog.Providers.SelectMany(provider =>
+                provider.Models.Select(model => new ModelChoice(
+                    $"{model.Name}  ·  {provider.Name}",
+                    provider.Id,
+                    model.Id,
+                    model.Reasoning))));
+            ModelComboBox.ItemsSource = choices;
+            ModelComboBox.SelectedItem = choices.FirstOrDefault(choice =>
+                choice.Provider == previous?.Provider && choice.Model == previous?.Model) ?? choices[0];
+
+            var defaultEffort = catalog.DefaultThinkingEffort ?? "off";
+            ThinkingEffortComboBox.SelectedItem = ThinkingEffortChoices()
+                .FirstOrDefault(choice => choice.Value == defaultEffort)
+                ?? ThinkingEffortChoices()[0];
+        }
+        catch (Exception)
+        {
+            ToolTipService.SetToolTip(
+                ModelComboBox,
+                Strings.Get("暂时无法加载模型列表，将使用 Goose 默认设置。", "Models are temporarily unavailable; Goose defaults will be used."));
+        }
+    }
+
+    private void ModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        ThinkingEffortComboBox.Visibility =
+            ModelComboBox.SelectedItem is ModelChoice { Reasoning: true }
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+    }
+
+    private LauncherSessionSelection? GetSessionSelection()
+    {
+        if (ModelComboBox.SelectedItem is not ModelChoice { Provider: not null, Model: not null } model)
+            return null;
+        var thinkingEffort = model.Reasoning &&
+            ThinkingEffortComboBox.SelectedItem is ThinkingEffortChoice effort
+                ? effort.Value
+                : null;
+        return new LauncherSessionSelection(model.Provider, model.Model, thinkingEffort);
+    }
 
     private void UpdateRunButton() =>
         RunButton.IsEnabled = !_running && !string.IsNullOrWhiteSpace(PromptTextBox.Text);
@@ -357,6 +461,8 @@ public sealed partial class OverlayWindow : Window
         RunButton.Content = Strings.Get("运行", "Run");
         CloseButton.Content = Strings.Get("关闭", "Close");
         OpenSettingsButton.Content = Strings.Get("设置", "Settings");
+        ModelComboBox.Header = Strings.Get("模型", "Model");
+        ThinkingEffortComboBox.Header = Strings.Get("推理强度", "Reasoning effort");
         HintTextBlock.Text = GetDefaultHint();
         UpdateOpenTargetButton();
     }

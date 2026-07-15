@@ -16,6 +16,7 @@ use goose_mcp::{AutoVisualiserRouter, ComputerControllerServer, MemoryServer, Tu
 use crate::commands::configure::configure_telemetry_consent_dialog;
 use crate::commands::configure::handle_configure;
 use crate::commands::info::handle_info;
+use crate::commands::launcher_options::handle_launcher_options;
 use crate::commands::plugin::{handle_plugin_install, handle_plugin_update};
 use crate::commands::project::{handle_project_default, handle_projects_interactive};
 use crate::commands::recipe::{handle_deeplink, handle_list, handle_open, handle_validate};
@@ -344,6 +345,14 @@ pub struct ModelOptions {
         long_help = "Override the GOOSE_MODEL environment variable for this run. The model must be supported by the specified provider."
     )]
     pub model: Option<String>,
+
+    /// Thinking effort to use for this run
+    #[arg(
+        long = "thinking-effort",
+        value_name = "EFFORT",
+        help = "Override thinking effort for this run (off, low, medium, high, max)"
+    )]
+    pub thinking_effort: Option<goose_providers::thinking::ThinkingEffort>,
 }
 
 /// Run execution behavior options
@@ -802,6 +811,10 @@ enum RecipeCommand {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Print the model catalog used by the Windows Launcher
+    #[command(hide = true)]
+    LauncherOptions,
+
     /// Configure goose settings
     #[command(about = "Configure goose settings")]
     Configure {},
@@ -1336,6 +1349,7 @@ pub struct InputConfig {
 
 fn get_command_name(command: &Option<Command>) -> &'static str {
     match command {
+        Some(Command::LauncherOptions) => "launcher-options",
         Some(Command::Configure {}) => "configure",
         Some(Command::Doctor {}) => "doctor",
         Some(Command::Info { .. }) => "info",
@@ -1685,6 +1699,7 @@ async fn handle_interactive_session(
         additional_system_prompt: None,
         provider: None,
         model: None,
+        thinking_effort: None,
         debug: session_opts.debug,
         max_tool_repetitions: session_opts.max_tool_repetitions,
         max_turns: session_opts.max_turns,
@@ -1898,6 +1913,7 @@ async fn handle_run_command(
         additional_system_prompt: input_config.additional_system_prompt,
         provider: model_opts.provider,
         model: model_opts.model,
+        thinking_effort: model_opts.thinking_effort,
         debug: session_opts.debug,
         max_tool_repetitions: session_opts.max_tool_repetitions,
         max_turns: session_opts.max_turns,
@@ -2188,6 +2204,7 @@ async fn handle_default_session() -> Result<()> {
         additional_system_prompt: None,
         provider: None,
         model: None,
+        thinking_effort: None,
         debug: false,
         max_tool_repetitions: None,
         max_turns: None,
@@ -2207,8 +2224,10 @@ pub async fn cli() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    if let Err(e) = crate::project_tracker::update_project_tracker(None, None) {
-        warn!("Warning: Failed to update project tracker: {}", e);
+    if !matches!(&cli.command, Some(Command::LauncherOptions)) {
+        if let Err(e) = crate::project_tracker::update_project_tracker(None, None) {
+            warn!("Warning: Failed to update project tracker: {}", e);
+        }
     }
 
     let command_name = get_command_name(&cli.command);
@@ -2219,6 +2238,7 @@ pub async fn cli() -> anyhow::Result<()> {
     );
 
     match cli.command {
+        Some(Command::LauncherOptions) => handle_launcher_options().await,
         Some(Command::Completion { shell, bin_name }) => {
             let mut cmd = Cli::command();
             shell.generate(&mut cmd, &bin_name, &mut std::io::stdout());
@@ -2382,6 +2402,34 @@ pub async fn cli() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launcher_options_command_parses() {
+        let cli = Cli::try_parse_from(["goose", "launcher-options"]).expect("parse failed");
+        assert!(matches!(cli.command, Some(Command::LauncherOptions)));
+    }
+
+    #[test]
+    fn run_command_accepts_thinking_effort() {
+        let cli = Cli::try_parse_from([
+            "goose",
+            "run",
+            "--text",
+            "test",
+            "--thinking-effort",
+            "high",
+        ])
+        .expect("parse failed");
+        match cli.command {
+            Some(Command::Run { model_opts, .. }) => {
+                assert_eq!(
+                    model_opts.thinking_effort.map(|effort| effort.to_string()),
+                    Some("high".to_string())
+                );
+            }
+            _ => panic!("expected run command"),
+        }
+    }
 
     #[test]
     fn completion_command_accepts_nushell_alias() {

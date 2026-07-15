@@ -39,11 +39,48 @@ describe('Desktop activation protocol', () => {
   });
 
   it('rejects incompatible versions', () => {
-    const payload = Buffer.from(JSON.stringify(request({ protocolVersion: 2 })));
+    const payload = Buffer.from(JSON.stringify(request({ protocolVersion: 1 })));
     expect(() => parseDesktopActivationRequest(payload)).toThrowError(
       expect.objectContaining<Partial<DesktopActivationProtocolError>>({
         code: 'unsupported_version',
       })
+    );
+  });
+
+  it('parses a session-scoped model and thinking effort', () => {
+    const payload = Buffer.from(
+      JSON.stringify(
+        request({
+          sessionSelection: {
+            provider: 'chatgpt_codex',
+            model: 'gpt-5.4',
+            thinkingEffort: 'high',
+          },
+        })
+      )
+    );
+
+    expect(parseDesktopActivationRequest(payload).sessionSelection).toEqual({
+      provider: 'chatgpt_codex',
+      model: 'gpt-5.4',
+      thinkingEffort: 'high',
+    });
+  });
+
+  it('rejects an unknown thinking effort', () => {
+    const payload = Buffer.from(
+      JSON.stringify(
+        request({
+          sessionSelection: {
+            provider: 'chatgpt_codex',
+            model: 'gpt-5.4',
+            thinkingEffort: 'extreme',
+          },
+        })
+      )
+    );
+    expect(() => parseDesktopActivationRequest(payload)).toThrowError(
+      expect.objectContaining<Partial<DesktopActivationProtocolError>>({ code: 'invalid_request' })
     );
   });
 

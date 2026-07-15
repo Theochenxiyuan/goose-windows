@@ -5,6 +5,7 @@ import {
   DesktopActivationProtocolError,
   type DesktopActivationRequest,
   type DesktopActivationResponse,
+  type LauncherSessionSelection,
   desktopActivationCapabilities,
 } from './protocol';
 
@@ -21,6 +22,7 @@ export interface LauncherChatOptions {
   initialMessage?: string;
   initialMessageNoAutoSubmit?: boolean;
   dir?: string;
+  launcherSessionSelection?: LauncherSessionSelection;
 }
 
 export type CreateLauncherChat = (
@@ -94,6 +96,7 @@ export class DesktopActivationRouter {
           ? buildLauncherInitialMessage(request.prompt!, request.files)
           : undefined,
       initialMessageNoAutoSubmit: false,
+      launcherSessionSelection: request.sessionSelection,
     });
     if (!window || window.isDestroyed()) {
       throw new DesktopActivationProtocolError(

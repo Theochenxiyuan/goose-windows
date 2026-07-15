@@ -10,6 +10,7 @@ var tests = new (string Name, Action Run)[]
     ("activation rejects too many files", RejectsTooManyFiles),
     ("task prompt text names selected files", PromptNamesSelectedFiles),
     ("Desktop activation frames preserve Unicode inputs", FramesDesktopActivation),
+    ("Desktop activation frames include session selection", FramesDesktopSessionSelection),
     ("Desktop capabilities frames omit absent run fields", FramesDesktopCapabilities),
     ("Desktop activation client completes capabilities and run handshake", ActivatesDesktopOverUserPipe),
     ("Desktop cold start contains no task data", BuildsPrivateDesktopLaunchArguments),
@@ -17,6 +18,8 @@ var tests = new (string Name, Action Run)[]
     ("Goose locator rejects a product without Desktop", RejectsProductWithoutDesktop),
     ("Goose locator rejects a product without CLI", RejectsProductWithoutCli),
     ("Goose terminal launch preserves exact prompt arguments", BuildsInteractiveRunArguments),
+    ("Goose terminal launch includes session selection", BuildsSelectedInteractiveRunArguments),
+    ("Launcher model catalog parses the Goose JSON contract", ParsesLauncherOptions),
     ("Goose CLI session launch uses the selected directory", BuildsInteractiveSessionArguments)
 };
 
@@ -98,6 +101,23 @@ static void FramesDesktopCapabilities()
     if (root.TryGetProperty("prompt", out _)) throw new Exception("Capabilities request contains a null prompt.");
 }
 
+static void FramesDesktopSessionSelection()
+{
+    var selection = new LauncherSessionSelection("chatgpt_codex", "gpt-5.4", "high");
+    var frame = DesktopActivationProtocol.EncodeRequest(
+        "request-1",
+        "run",
+        new string('a', 64),
+        @"C:\workspace",
+        "test",
+        sessionSelection: selection);
+    using var document = JsonDocument.Parse(frame.AsMemory(4));
+    var encoded = document.RootElement.GetProperty("sessionSelection");
+    Equal(selection.Provider, encoded.GetProperty("provider").GetString());
+    Equal(selection.Model, encoded.GetProperty("model").GetString());
+    Equal(selection.ThinkingEffort, encoded.GetProperty("thinkingEffort").GetString());
+}
+
 static void BuildsPrivateDesktopLaunchArguments()
 {
     using var workspace = TestWorkspace.Create("Desktop workspace");
@@ -162,7 +182,8 @@ static async Task ActivatesDesktopOverUserPipeAsync()
                         ["ping", "capabilities", "run", "open"],
                         DesktopActivationProtocol.MaxPayloadBytes,
                         64 * 1024,
-                        ActivationRequest.MaxFiles));
+                        ActivationRequest.MaxFiles,
+                        true));
             }
             else
             {
@@ -238,6 +259,41 @@ static void BuildsInteractiveSessionArguments()
     Equal(true, startInfo.UseShellExecute);
     Equal(1, startInfo.ArgumentList.Count);
     Equal("session", startInfo.ArgumentList[0]);
+}
+
+static void BuildsSelectedInteractiveRunArguments()
+{
+    using var workspace = TestWorkspace.Create("selected terminal workspace");
+    var cli = workspace.File("goose.exe");
+    var selection = new LauncherSessionSelection("chatgpt_codex", "gpt-5.4", "high");
+    var startInfo = new GooseInstallation(cli, workspace.File("Goose.exe"))
+        .CreateInteractiveRunStartInfo(workspace.Path, "test", selection);
+    Equal(
+        "run|--provider|chatgpt_codex|--model|gpt-5.4|--thinking-effort|high|--text|test|--interactive",
+        string.Join('|', startInfo.ArgumentList));
+}
+
+static void ParsesLauncherOptions()
+{
+    const string json = """
+        {
+          "schemaVersion": 1,
+          "defaultProvider": "chatgpt_codex",
+          "defaultModel": "gpt-5.4",
+          "defaultThinkingEffort": "medium",
+          "providers": [
+            {
+              "id": "chatgpt_codex",
+              "name": "ChatGPT Codex",
+              "models": [{ "id": "gpt-5.4", "name": "GPT-5.4", "reasoning": true }]
+            }
+          ]
+        }
+        """;
+    var catalog = LauncherOptionsCatalog.Parse(json);
+    Equal("chatgpt_codex", catalog.DefaultProvider);
+    Equal("gpt-5.4", catalog.Providers[0].Models[0].Id);
+    Equal(true, catalog.Providers[0].Models[0].Reasoning);
 }
 
 static void Equal<T>(T expected, T actual)

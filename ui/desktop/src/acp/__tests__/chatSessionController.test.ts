@@ -11,10 +11,12 @@ import {
 import { acpCancelPrompt, acpPromptSession } from '../prompt';
 import {
   acpLoadSession,
+  acpNewSession,
   acpTruncateSessionConversation,
   isAcpSessionLoadInFlight,
   sessionInfoToSession,
 } from '../sessions';
+import { acpSetSessionProviderModel } from '../providers';
 
 vi.mock('../../utils/extensionErrorUtils', () => ({
   showExtensionLoadResults: vi.fn(),
@@ -46,10 +48,15 @@ vi.mock('../chatSessionStore', () => ({
 
 vi.mock('../sessions', () => ({
   acpLoadSession: vi.fn(),
+  acpNewSession: vi.fn(),
   isAcpSessionLoadInFlight: vi.fn(),
   sessionInfoToSession: vi.fn(),
   acpForkSession: vi.fn(),
   acpTruncateSessionConversation: vi.fn(),
+}));
+
+vi.mock('../providers', () => ({
+  acpSetSessionProviderModel: vi.fn(),
 }));
 
 vi.mock('../prompt', () => ({
@@ -94,6 +101,52 @@ function mockLoadResult() {
     meta: {},
   } as Awaited<ReturnType<typeof acpLoadSession>>;
 }
+
+describe('acpChatSessionController.createSession', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(acpNewSession).mockResolvedValue({
+      sessionId: SESSION_ID,
+      sessionInfo: {
+        sessionId: SESSION_ID,
+        cwd: '/tmp',
+        title: 'New session',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+      meta: {},
+    });
+    vi.mocked(sessionInfoToSession).mockReturnValue(loadedSession());
+    vi.mocked(acpSetSessionProviderModel).mockResolvedValue({
+      providerId: 'chatgpt_codex',
+      modelId: 'gpt-5.4',
+    });
+  });
+
+  it('applies Launcher session selection before publishing the new session', async () => {
+    await acpChatSessionController.createSession('/tmp', [], undefined, {
+      provider: 'chatgpt_codex',
+      model: 'gpt-5.4',
+      thinkingEffort: 'high',
+    });
+
+    expect(acpSetSessionProviderModel).toHaveBeenCalledWith(
+      SESSION_ID,
+      'chatgpt_codex',
+      'gpt-5.4',
+      'high'
+    );
+    expect(vi.mocked(acpSetSessionProviderModel).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(acpChatSessionActions.finishSessionLoad).mock.invocationCallOrder[0]
+    );
+    expect(acpChatSessionActions.finishSessionLoad).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({
+        provider_name: 'chatgpt_codex',
+        model_config: expect.objectContaining({ model_name: 'gpt-5.4' }),
+      })
+    );
+  });
+});
 
 function snapshotWithActivePrompt(activePromptAttemptId: string | null): AcpChatSessionSnapshot {
   return {

@@ -24,6 +24,8 @@ import {
   sessionInfoToSession,
   type AcpRecipeOptions,
 } from './sessions';
+import { acpSetSessionProviderModel } from './providers';
+import type { LauncherSessionSelection } from '../launcherActivation/protocol';
 
 export interface AcpLoadSessionOptions {
   onSessionLoaded?: () => void;
@@ -41,7 +43,8 @@ export interface AcpChatSessionController {
   createSession(
     cwd: string,
     gooseExtensions: GooseExtension[],
-    recipe?: AcpRecipeOptions
+    recipe?: AcpRecipeOptions,
+    launcherSessionSelection?: LauncherSessionSelection
   ): Promise<Session>;
   loadSession(sessionId: string, options?: AcpLoadSessionOptions): Promise<void>;
   restoreSession(sessionId: string): Promise<void>;
@@ -104,10 +107,28 @@ async function forkSessionWithEditedMessage(
 async function createSession(
   cwd: string,
   gooseExtensions: GooseExtension[],
-  recipe?: AcpRecipeOptions
+  recipe?: AcpRecipeOptions,
+  launcherSessionSelection?: LauncherSessionSelection
 ): Promise<Session> {
   const { sessionId, sessionInfo, meta } = await acpNewSession(cwd, gooseExtensions, recipe);
-  const session = sessionInfoToSession(sessionInfo, meta);
+  let session = sessionInfoToSession(sessionInfo, meta);
+
+  if (launcherSessionSelection) {
+    const applied = await acpSetSessionProviderModel(
+      sessionId,
+      launcherSessionSelection.provider,
+      launcherSessionSelection.model,
+      launcherSessionSelection.thinkingEffort
+    );
+    session = {
+      ...session,
+      provider_name: applied.providerId ?? launcherSessionSelection.provider,
+      model_config: {
+        ...(session.model_config ?? { toolshim: false }),
+        model_name: applied.modelId ?? launcherSessionSelection.model,
+      },
+    };
+  }
 
   showExtensionLoadResults(meta.extensionResults);
   window.dispatchEvent(

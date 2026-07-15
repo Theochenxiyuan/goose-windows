@@ -23,11 +23,13 @@ import { acpListSessions, acpDeleteSession } from './acp/sessions';
 import { ChatType } from './types/chat';
 import Hub from './components/Hub';
 import { UserInput } from './types/message';
+import type { LauncherSessionSelection } from './launcherActivation/protocol';
 
 interface PairRouteState {
   resumeSessionId?: string;
   initialMessage?: UserInput;
   noAutoSubmit?: boolean;
+  launcherSessionSelection?: LauncherSessionSelection;
 }
 import SettingsView, { SettingsViewOptions } from './components/settings/SettingsView';
 import SessionsView from './components/sessions/SessionsView';
@@ -106,6 +108,7 @@ const PairRouteWrapper = ({
   const recipeIdFromConfig = window.appConfig?.get('recipeId') as string | undefined;
   const initialMessage = routeState.initialMessage;
   const noAutoSubmit = routeState.noAutoSubmit;
+  const launcherSessionSelection = routeState.launcherSessionSelection;
 
   // Create session if we have an initialMessage, recipeDeeplink, or recipeId but no sessionId
   useEffect(() => {
@@ -122,6 +125,7 @@ const PairRouteWrapper = ({
             recipeDeeplink: recipeDeeplinkFromConfig,
             recipeId: recipeIdFromConfig,
             allExtensions: extensionsList,
+            launcherSessionSelection,
           });
           const sessionInitialMessage = resolveSessionInitialMessage(newSession, initialMessage);
 
@@ -163,6 +167,7 @@ const PairRouteWrapper = ({
     resumeSessionId,
     setSearchParams,
     extensionsList,
+    launcherSessionSelection,
   ]);
 
   // Add resumed session to active sessions if not already there
@@ -576,7 +581,13 @@ export function AppInner() {
   useEffect(() => {
     const handleSetInitialMessage = async (_event: IpcRendererEvent, ...args: unknown[]) => {
       const initialMessage = args[0] as string;
-      const options = (args[1] as { noAutoSubmit?: boolean } | undefined) || {};
+      const options =
+        (args[1] as
+          | {
+              noAutoSubmit?: boolean;
+              launcherSessionSelection?: LauncherSessionSelection;
+            }
+          | undefined) || {};
 
       if (initialMessage && !isProcessingRef.current) {
         isProcessingRef.current = true;
@@ -584,6 +595,7 @@ export function AppInner() {
           state: {
             initialMessage: { msg: initialMessage, images: [] },
             noAutoSubmit: options.noAutoSubmit,
+            launcherSessionSelection: options.launcherSessionSelection,
           },
         });
         setTimeout(() => {

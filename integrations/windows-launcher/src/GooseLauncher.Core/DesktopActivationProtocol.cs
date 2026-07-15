@@ -14,7 +14,8 @@ public sealed record DesktopActivationCapabilities(
     IReadOnlyList<string> Actions,
     int MaxPayloadBytes,
     int MaxPromptLength,
-    int MaxFiles);
+    int MaxFiles,
+    bool SessionSelection);
 
 public sealed record DesktopActivationResponse(
     int ProtocolVersion,
@@ -26,7 +27,7 @@ public sealed record DesktopActivationResponse(
 
 internal static class DesktopActivationProtocol
 {
-    internal const int Version = 1;
+    internal const int Version = 2;
     internal const int MaxPayloadBytes = 256 * 1024;
     internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -40,7 +41,8 @@ internal static class DesktopActivationProtocol
         string? cwd = null,
         string? prompt = null,
         IReadOnlyList<string>? files = null,
-        bool bringToFront = true)
+        bool bringToFront = true,
+        LauncherSessionSelection? sessionSelection = null)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(new
         {
@@ -52,6 +54,7 @@ internal static class DesktopActivationProtocol
             prompt,
             files = files ?? [],
             bringToFront,
+            sessionSelection,
         }, JsonOptions);
         if (payload.Length is <= 0 or > MaxPayloadBytes)
             throw new InvalidDataException("Desktop activation payload length is invalid.");

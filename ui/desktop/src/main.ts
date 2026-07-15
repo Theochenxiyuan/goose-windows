@@ -57,6 +57,7 @@ import { BLOCKED_PROTOCOLS, WEB_PROTOCOLS } from './utils/urlSecurity';
 import { buildCSP } from './utils/csp';
 import { DesktopActivationRouter } from './launcherActivation/router';
 import { DesktopActivationServer } from './launcherActivation/server';
+import type { LauncherSessionSelection } from './launcherActivation/protocol';
 
 function shouldSetupUpdater(): boolean {
   return UPDATES_ENABLED;
@@ -974,6 +975,7 @@ const windowPowerSaveBlockers = new Map<number, number>(); // windowId -> blocke
 // Track pending initial messages per window
 const pendingInitialMessages = new Map<number, string>(); // windowId -> initialMessage
 const pendingInitialMessageNoAutoSubmit = new Set<number>(); // windowIds whose initialMessage should NOT auto-submit
+const pendingLauncherSessionSelections = new Map<number, LauncherSessionSelection>();
 let desktopActivationServer: DesktopActivationServer | undefined;
 let desktopActivationHandled = false;
 let desktopActivationFallbackTimer: ReturnType<typeof setTimeout> | undefined;
@@ -981,6 +983,7 @@ let desktopActivationFallbackTimer: ReturnType<typeof setTimeout> | undefined;
 interface CreateChatOptions {
   initialMessage?: string;
   initialMessageNoAutoSubmit?: boolean;
+  launcherSessionSelection?: LauncherSessionSelection;
   dir?: string;
   resumeSessionId?: string;
   viewType?: string;
@@ -997,6 +1000,7 @@ const createChat = async (
   const {
     initialMessage,
     initialMessageNoAutoSubmit,
+    launcherSessionSelection,
     dir,
     resumeSessionId,
     viewType,
@@ -1436,6 +1440,9 @@ const createChat = async (
   // If we have an initial message, store it to send after React is ready
   if (initialMessage) {
     pendingInitialMessages.set(mainWindow.id, initialMessage);
+    if (launcherSessionSelection) {
+      pendingLauncherSessionSelections.set(mainWindow.id, launcherSessionSelection);
+    }
     if (initialMessageNoAutoSubmit) {
       pendingInitialMessageNoAutoSubmit.add(mainWindow.id);
     }
@@ -1486,6 +1493,7 @@ const createChat = async (
     windowMap.delete(windowId);
 
     pendingInitialMessages.delete(windowId);
+    pendingLauncherSessionSelections.delete(windowId);
     pendingDeepLinks.delete(windowId);
     reactReadyWindows.delete(windowId);
 
@@ -1856,10 +1864,15 @@ ipcMain.on('react-ready', (event) => {
   if (windowId && pendingInitialMessages.has(windowId)) {
     const initialMessage = pendingInitialMessages.get(windowId)!;
     const noAutoSubmit = pendingInitialMessageNoAutoSubmit.has(windowId);
+    const launcherSessionSelection = pendingLauncherSessionSelections.get(windowId);
     log.info('Sending pending initial message to window');
-    window.webContents.send('set-initial-message', initialMessage, { noAutoSubmit });
+    window.webContents.send('set-initial-message', initialMessage, {
+      noAutoSubmit,
+      launcherSessionSelection,
+    });
     pendingInitialMessages.delete(windowId);
     pendingInitialMessageNoAutoSubmit.delete(windowId);
+    pendingLauncherSessionSelections.delete(windowId);
   }
 
   if (windowId && pendingDeepLinks.has(windowId) && window) {
