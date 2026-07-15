@@ -13,10 +13,9 @@ var tests = new (string Name, Action Run)[]
     ("Desktop capabilities frames omit absent run fields", FramesDesktopCapabilities),
     ("Desktop activation client completes capabilities and run handshake", ActivatesDesktopOverUserPipe),
     ("Desktop cold start contains no task data", BuildsPrivateDesktopLaunchArguments),
-    ("Goose locator honors explicit CLI path", LocatesExplicitCli),
-    ("Goose locator honors Companion path overrides", LocatesCompanionOverrides),
-    ("Goose locator pairs a Desktop override with its bundled CLI", PairsDesktopOverrideWithBundledCli),
-    ("Goose locator rejects a missing CLI override", RejectsMissingCliOverride),
+    ("Goose locator resolves the unified product layout", LocatesUnifiedProduct),
+    ("Goose locator rejects a product without Desktop", RejectsProductWithoutDesktop),
+    ("Goose locator rejects a product without CLI", RejectsProductWithoutCli),
     ("Goose terminal launch preserves exact prompt arguments", BuildsInteractiveRunArguments),
     ("Goose CLI session launch uses the selected directory", BuildsInteractiveSessionArguments)
 };
@@ -188,48 +187,29 @@ static async Task ActivatesDesktopOverUserPipeAsync()
     Equal(selectedFile, receivedFile);
 }
 
-static void LocatesExplicitCli()
+static void LocatesUnifiedProduct()
 {
     using var workspace = TestWorkspace.Create();
-    var cli = workspace.File("goose.exe");
-    var previous = Environment.GetEnvironmentVariable("GOOSE_CLI_PATH");
-    try
-    {
-        Environment.SetEnvironmentVariable("GOOSE_CLI_PATH", cli);
-        Equal(cli, GooseInstallation.Locate()?.CliPath);
-    }
-    finally { Environment.SetEnvironmentVariable("GOOSE_CLI_PATH", previous); }
-}
-
-static void LocatesCompanionOverrides()
-{
-    using var workspace = TestWorkspace.Create();
-    var cli = workspace.File("goose.exe");
     var desktop = workspace.File("Goose.exe");
-    var installation = GooseInstallation.Locate(cli, desktop) ?? throw new Exception("Configured Goose paths were not resolved.");
+    var cli = workspace.File(System.IO.Path.Combine("resources", "bin", "goose.exe"));
+    var installation = GooseInstallation.LocateProductRoot(workspace.Path)
+        ?? throw new Exception("Unified Goose product was not resolved.");
     Equal(cli, installation.CliPath);
     Equal(desktop, installation.DesktopPath);
 }
 
-static void RejectsMissingCliOverride()
+static void RejectsProductWithoutDesktop()
 {
     using var workspace = TestWorkspace.Create();
-    var missing = System.IO.Path.Combine(workspace.Path, "missing-goose.exe");
-    Equal<GooseInstallation?>(null, GooseInstallation.Locate(missing));
+    workspace.File(System.IO.Path.Combine("resources", "bin", "goose.exe"));
+    Equal<GooseInstallation?>(null, GooseInstallation.LocateProductRoot(workspace.Path));
 }
 
-static void PairsDesktopOverrideWithBundledCli()
+static void RejectsProductWithoutCli()
 {
     using var workspace = TestWorkspace.Create();
-    var desktopDirectory = Directory.CreateDirectory(System.IO.Path.Combine(workspace.Path, "desktop")).FullName;
-    var desktop = System.IO.Path.Combine(desktopDirectory, "Goose.exe");
-    File.WriteAllText(desktop, "test");
-    var cliDirectory = Directory.CreateDirectory(System.IO.Path.Combine(desktopDirectory, "resources", "bin")).FullName;
-    var cli = System.IO.Path.Combine(cliDirectory, "goose.exe");
-    File.WriteAllText(cli, "test");
-    var installation = GooseInstallation.Locate(desktopOverride: desktop) ?? throw new Exception("Desktop override was not resolved.");
-    Equal(cli, installation.CliPath);
-    Equal(desktop, installation.DesktopPath);
+    workspace.File("Goose.exe");
+    Equal<GooseInstallation?>(null, GooseInstallation.LocateProductRoot(workspace.Path));
 }
 
 static void BuildsInteractiveRunArguments()
@@ -237,7 +217,7 @@ static void BuildsInteractiveRunArguments()
     using var workspace = TestWorkspace.Create("terminal workspace");
     var cli = workspace.File("goose.exe");
     const string prompt = "Inspect these exact inputs; keep the semicolon.\r\n1. C:\\example path\\ui.png";
-    var startInfo = new GooseInstallation(cli, null).CreateInteractiveRunStartInfo(workspace.Path, prompt);
+    var startInfo = new GooseInstallation(cli, workspace.File("Goose.exe")).CreateInteractiveRunStartInfo(workspace.Path, prompt);
     Equal(cli, startInfo.FileName);
     Equal(Path.GetFullPath(workspace.Path), startInfo.WorkingDirectory);
     Equal(true, startInfo.UseShellExecute);
@@ -252,7 +232,7 @@ static void BuildsInteractiveSessionArguments()
 {
     using var workspace = TestWorkspace.Create("CLI workspace");
     var cli = workspace.File("goose.exe");
-    var startInfo = new GooseInstallation(cli, null).CreateInteractiveSessionStartInfo(workspace.Path);
+    var startInfo = new GooseInstallation(cli, workspace.File("Goose.exe")).CreateInteractiveSessionStartInfo(workspace.Path);
     Equal(cli, startInfo.FileName);
     Equal(Path.GetFullPath(workspace.Path), startInfo.WorkingDirectory);
     Equal(true, startInfo.UseShellExecute);
@@ -285,6 +265,7 @@ sealed class TestWorkspace : IDisposable
     internal string File(string name)
     {
         var path = System.IO.Path.Combine(Path, name);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
         System.IO.File.WriteAllText(path, "test");
         return path;
     }

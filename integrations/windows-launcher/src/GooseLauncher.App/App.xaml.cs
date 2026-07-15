@@ -128,11 +128,8 @@ public partial class App : Application
     {
         try
         {
-            var preferences = CompanionSettingsStore.Load();
-            var installation = GooseInstallation.Locate(preferences.CliPath, preferences.DesktopPath)
-                ?? throw new FileNotFoundException(Strings.Get("Goose CLI 未找到。", "Goose CLI was not found."));
-            if (installation.DesktopPath is null)
-                throw new FileNotFoundException(Strings.Get("Goose Desktop 未找到。", "Goose Desktop was not found."));
+            var installation = GooseInstallation.Locate()
+                ?? throw new FileNotFoundException(Strings.Get("Goose 安装不完整，请重新安装。", "The Goose installation is incomplete. Reinstall Goose."));
             GooseProcessLauncher.OpenDesktop(installation);
         }
         catch (Exception error)
@@ -145,9 +142,8 @@ public partial class App : Application
     {
         try
         {
-            var preferences = CompanionSettingsStore.Load();
-            var installation = GooseInstallation.Locate(preferences.CliPath, preferences.DesktopPath)
-                ?? throw new FileNotFoundException(Strings.Get("Goose CLI 未找到。", "Goose CLI was not found."));
+            var installation = GooseInstallation.Locate()
+                ?? throw new FileNotFoundException(Strings.Get("Goose 安装不完整，请重新安装。", "The Goose installation is incomplete. Reinstall Goose."));
             var folder = _overlay?.CurrentFolderForLaunch
                 ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             GooseProcessLauncher.OpenTerminalSession(installation, folder);

@@ -40,9 +40,6 @@ public sealed class DesktopActivationClient
         IReadOnlyList<string> files,
         CancellationToken cancellationToken = default)
     {
-        if (installation.DesktopPath is null)
-            throw new FileNotFoundException("Goose Desktop was not found.");
-
         var requestId = Guid.NewGuid().ToString("D");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(DefaultTimeout);

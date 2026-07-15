@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Publisher = 'CN=GooseLauncher.Dev',
+    [string]$Publisher = 'CN=GooseWindows.Dev',
+    [string]$DesktopSourceDir,
     [switch]$Sign,
     [switch]$Install,
     [switch]$RestartExplorer
@@ -9,21 +10,35 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$artifactRoot = Join-Path $repoRoot 'artifacts\msix'
+$launcherRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$workspaceRoot = [IO.Path]::GetFullPath((Join-Path $launcherRoot '..\..'))
+$artifactRoot = Join-Path $launcherRoot 'artifacts\msix'
 $publishDir = Join-Path $artifactRoot 'publish'
 $stageDir = Join-Path $artifactRoot 'stage'
+$launcherStageDir = Join-Path $stageDir 'launcher'
 $priInputDir = Join-Path $artifactRoot 'pri-input'
-$manifestTemplatePath = Join-Path $repoRoot 'packaging\Package.appxmanifest.template'
-$manifestTemplate = Get-Content -LiteralPath $manifestTemplatePath -Raw -Encoding UTF8
-$versionMatch = [Regex]::Match($manifestTemplate, '<Identity\b[^>]*\bVersion="([0-9]+(?:\.[0-9]+){3})"')
-if (-not $versionMatch.Success) { throw "Package identity version is missing in $manifestTemplatePath" }
-$packagePath = Join-Path $artifactRoot "GooseLauncher_$($versionMatch.Groups[1].Value)_x64.msix"
+$launcherPriInputDir = Join-Path $priInputDir 'launcher'
+$manifestTemplatePath = Join-Path $launcherRoot 'packaging\Package.appxmanifest.template'
+$desktopPackagePath = Join-Path $workspaceRoot 'ui\desktop\package.json'
+$desktopImagesDir = Join-Path $workspaceRoot 'ui\desktop\src\images'
+if ([string]::IsNullOrWhiteSpace($DesktopSourceDir)) {
+    $DesktopSourceDir = Join-Path $workspaceRoot 'ui\desktop\out\Goose-win32-x64'
+}
+$DesktopSourceDir = [IO.Path]::GetFullPath($DesktopSourceDir)
+
+$desktopPackage = Get-Content -LiteralPath $desktopPackagePath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($desktopPackage.version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?$') {
+    throw "Desktop version is not compatible with MSIX: $($desktopPackage.version)"
+}
+$packageVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$(if ($Matches[4]) { $Matches[4] } else { '0' })"
+$packagePath = Join-Path $artifactRoot "Goose_${packageVersion}_x64.msix"
 
 function Assert-WorkspacePath([string]$Path) {
     $resolved = [IO.Path]::GetFullPath($Path)
-    $prefix = $repoRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-    if (-not $resolved.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing to modify a path outside the workspace: $resolved" }
+    $prefix = $workspaceRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolved.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to modify a path outside the workspace: $resolved"
+    }
 }
 
 function Reset-Directory([string]$Path) {
@@ -37,44 +52,38 @@ function Invoke-Checked([string]$FilePath, [string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "$FilePath failed with exit code $LASTEXITCODE" }
 }
 
-function New-Logo([string]$Path, [int]$Size) {
+function New-ResizedPng([string]$Source, [string]$Destination, [int]$Size) {
     Add-Type -AssemblyName System.Drawing
-    $bitmap = [Drawing.Bitmap]::new($Size, $Size)
+    $sourceImage = [Drawing.Image]::FromFile($Source)
     try {
-        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $bitmap = [Drawing.Bitmap]::new($Size, $Size, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
         try {
-            $graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
-            $graphics.Clear([Drawing.Color]::FromArgb(22, 125, 105))
-            $font = [Drawing.Font]::new('Segoe UI', [Math]::Max(8, $Size * 0.58), [Drawing.FontStyle]::Bold, [Drawing.GraphicsUnit]::Pixel)
-            $brush = [Drawing.SolidBrush]::new([Drawing.Color]::White)
+            $graphics = [Drawing.Graphics]::FromImage($bitmap)
             try {
-                $format = [Drawing.StringFormat]::new()
-                $format.Alignment = [Drawing.StringAlignment]::Center
-                $format.LineAlignment = [Drawing.StringAlignment]::Center
-                $graphics.DrawString('G', $font, $brush, [Drawing.RectangleF]::new(0, 0, $Size, $Size), $format)
-                $format.Dispose()
-            } finally { $brush.Dispose(); $font.Dispose() }
-        } finally { $graphics.Dispose() }
-        $bitmap.Save($Path, [Drawing.Imaging.ImageFormat]::Png)
-    } finally { $bitmap.Dispose() }
+                $graphics.CompositingMode = [Drawing.Drawing2D.CompositingMode]::SourceCopy
+                $graphics.CompositingQuality = [Drawing.Drawing2D.CompositingQuality]::HighQuality
+                $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::HighQuality
+                $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                $graphics.DrawImage($sourceImage, 0, 0, $Size, $Size)
+            } finally { $graphics.Dispose() }
+            $bitmap.Save($Destination, [Drawing.Imaging.ImageFormat]::Png)
+        } finally { $bitmap.Dispose() }
+    } finally { $sourceImage.Dispose() }
 }
 
-function New-PngIcon([string]$PngPath, [string]$IconPath, [int]$Size) {
-    $png = [IO.File]::ReadAllBytes($PngPath)
-    $stream = [IO.File]::Create($IconPath)
-    try {
-        $writer = [IO.BinaryWriter]::new($stream)
-        try {
-            $writer.Write([UInt16]0); $writer.Write([UInt16]1); $writer.Write([UInt16]1)
-            $writer.Write([Byte]$Size); $writer.Write([Byte]$Size); $writer.Write([Byte]0); $writer.Write([Byte]0)
-            $writer.Write([UInt16]1); $writer.Write([UInt16]32); $writer.Write([UInt32]$png.Length); $writer.Write([UInt32]22); $writer.Write($png)
-        } finally { $writer.Dispose() }
-    } finally { $stream.Dispose() }
+if (-not (Test-Path -LiteralPath (Join-Path $DesktopSourceDir 'Goose.exe'))) {
+    throw "Packaged Goose Desktop was not found in $DesktopSourceDir. Run pnpm run package first."
+}
+if (-not (Test-Path -LiteralPath (Join-Path $DesktopSourceDir 'resources\bin\goose.exe'))) {
+    throw "Bundled Goose CLI was not found in $DesktopSourceDir\resources\bin."
 }
 
 Reset-Directory $publishDir
 Reset-Directory $stageDir
 Reset-Directory $priInputDir
+New-Item -ItemType Directory -Path $launcherStageDir,$launcherPriInputDir -Force | Out-Null
+Copy-Item -Path (Join-Path $DesktopSourceDir '*') -Destination $stageDir -Recurse -Force
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio Build Tools with MSVC v143 are required to build the Explorer command.' }
@@ -82,46 +91,45 @@ $msbuild = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild 
 if (-not $msbuild) { throw 'MSBuild could not be located.' }
 
 Invoke-Checked $msbuild @(
-    (Join-Path $repoRoot 'src\GooseLauncher.ShellExtension\GooseLauncher.ShellExtension.vcxproj'),
+    (Join-Path $launcherRoot 'src\GooseLauncher.ShellExtension\GooseLauncher.ShellExtension.vcxproj'),
     '/m', '/p:Configuration=Release', '/p:Platform=x64', '/verbosity:minimal'
 )
 Invoke-Checked 'dotnet' @(
-    'publish', (Join-Path $repoRoot 'src\GooseLauncher.App\GooseLauncher.App.csproj'),
+    'publish', (Join-Path $launcherRoot 'src\GooseLauncher.App\GooseLauncher.App.csproj'),
     '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
     '-p:WindowsAppSDKSelfContained=true', '-p:GooseLauncherPackaged=true', '-o', $publishDir
 )
-Copy-Item -Path (Join-Path $publishDir '*') -Destination $stageDir -Recurse -Force
-Copy-Item -LiteralPath (Join-Path $repoRoot 'src\GooseLauncher.ShellExtension\x64\Release\GooseLauncher.ShellExtension.dll') -Destination $stageDir -Force
-  Remove-Item -LiteralPath (Join-Path $stageDir 'GooseLauncher.pdb') -Force -ErrorAction SilentlyContinue
+Copy-Item -Path (Join-Path $publishDir '*') -Destination $launcherStageDir -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $launcherRoot 'src\GooseLauncher.ShellExtension\x64\Release\GooseLauncher.ShellExtension.dll') -Destination $launcherStageDir -Force
+Remove-Item -LiteralPath (Join-Path $launcherStageDir 'GooseLauncher.pdb') -Force -ErrorAction SilentlyContinue
 
 $assets = Join-Path $stageDir 'Assets'
 New-Item -ItemType Directory -Path $assets -Force | Out-Null
-New-Logo (Join-Path $assets 'Square44x44Logo.png') 44
-New-PngIcon (Join-Path $assets 'Square44x44Logo.png') (Join-Path $assets 'GooseLauncher.ico') 44
-New-Logo (Join-Path $assets 'Square150x150Logo.png') 150
-New-Logo (Join-Path $assets 'StoreLogo.png') 50
+$sourceLogo = Join-Path $desktopImagesDir 'icon-512.png'
+Copy-Item -LiteralPath (Join-Path $desktopImagesDir 'icon.ico') -Destination (Join-Path $assets 'Goose.ico') -Force
+New-ResizedPng $sourceLogo (Join-Path $assets 'Square44x44Logo.png') 44
+New-ResizedPng $sourceLogo (Join-Path $assets 'Square150x150Logo.png') 150
+New-ResizedPng $sourceLogo (Join-Path $assets 'StoreLogo.png') 50
 foreach ($scale in @(125, 150, 200, 400)) {
-    New-Logo (Join-Path $assets "Square44x44Logo.scale-$scale.png") ([Math]::Round(44 * $scale / 100))
-    New-Logo (Join-Path $assets "Square150x150Logo.scale-$scale.png") ([Math]::Round(150 * $scale / 100))
-    New-Logo (Join-Path $assets "StoreLogo.scale-$scale.png") ([Math]::Round(50 * $scale / 100))
+    New-ResizedPng $sourceLogo (Join-Path $assets "Square44x44Logo.scale-$scale.png") ([Math]::Round(44 * $scale / 100))
+    New-ResizedPng $sourceLogo (Join-Path $assets "Square150x150Logo.scale-$scale.png") ([Math]::Round(150 * $scale / 100))
+    New-ResizedPng $sourceLogo (Join-Path $assets "StoreLogo.scale-$scale.png") ([Math]::Round(50 * $scale / 100))
 }
 
-# A manually assembled WinUI MSIX must carry the compiled XAML and a package
-# resource index. dotnet publish emits the framework PRI files but does not
-# generate the package-level resources.pri without a packaging project.
-$appIntermediate = Join-Path $repoRoot 'src\GooseLauncher.App\obj\Release\net8.0-windows10.0.19041.0\win-x64'
+$appIntermediate = Join-Path $launcherRoot 'src\GooseLauncher.App\obj\Release\net8.0-windows10.0.19041.0\win-x64'
 $compiledXaml = @(Get-ChildItem -LiteralPath $appIntermediate -File -Filter '*.xbf')
 if ($compiledXaml.Count -eq 0) { throw "No compiled XAML resources were found under $appIntermediate" }
 foreach ($xbf in $compiledXaml) {
-    Copy-Item -LiteralPath $xbf.FullName -Destination $stageDir -Force
-    Copy-Item -LiteralPath $xbf.FullName -Destination $priInputDir -Force
+    Copy-Item -LiteralPath $xbf.FullName -Destination $launcherStageDir -Force
+    Copy-Item -LiteralPath $xbf.FullName -Destination $launcherPriInputDir -Force
 }
 Copy-Item -LiteralPath $assets -Destination $priInputDir -Recurse -Force
-Get-ChildItem -LiteralPath $stageDir -File -Filter '*.pri' |
+Get-ChildItem -LiteralPath $launcherStageDir -File -Filter '*.pri' |
     Where-Object Name -ne 'resources.pri' |
-    ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $priInputDir -Force }
+    ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $launcherPriInputDir -Force }
 
-$manifest = $manifestTemplate.Replace('CN=REPLACE_WITH_SIGNING_IDENTITY', $Publisher)
+$manifestTemplate = Get-Content -LiteralPath $manifestTemplatePath -Raw -Encoding UTF8
+$manifest = $manifestTemplate.Replace('CN=REPLACE_WITH_SIGNING_IDENTITY', $Publisher).Replace('__GOOSE_PACKAGE_VERSION__', $packageVersion)
 [IO.File]::WriteAllText((Join-Path $stageDir 'AppxManifest.xml'), $manifest, [Text.UTF8Encoding]::new($false))
 
 $sdkBinRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
@@ -146,13 +154,13 @@ if ($Install) { $Sign = $true }
 if ($Sign) {
     $certificate = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -eq $Publisher -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(30) } | Sort-Object NotAfter -Descending | Select-Object -First 1
     if (-not $certificate) {
-        $certificate = New-SelfSignedCertificate -Type Custom -Subject $Publisher -FriendlyName 'Goose Launcher development signing' -CertStoreLocation 'Cert:\CurrentUser\My' -KeyUsage DigitalSignature -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(3) -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
+        $certificate = New-SelfSignedCertificate -Type Custom -Subject $Publisher -FriendlyName 'Goose Windows development signing' -CertStoreLocation 'Cert:\CurrentUser\My' -KeyUsage DigitalSignature -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(3) -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
     }
     Invoke-Checked $signTool @('sign', '/fd', 'SHA256', '/s', 'My', '/sha1', $certificate.Thumbprint, $packagePath)
 }
 
 if ($Install) {
-    $certificateFile = Join-Path $artifactRoot 'GooseLauncher.Dev.cer'
+    $certificateFile = Join-Path $artifactRoot 'GooseWindows.Dev.cer'
     Export-Certificate -Cert $certificate -FilePath $certificateFile -Force | Out-Null
     if (-not (Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Thumbprint -eq $certificate.Thumbprint)) {
         $escapedCertificatePath = $certificateFile.Replace("'", "''")
@@ -162,7 +170,9 @@ if ($Install) {
         if ($elevated.ExitCode -ne 0) { throw "Development certificate installation failed with exit code $($elevated.ExitCode)" }
     }
     Get-Process -Name 'GooseLauncher' -ErrorAction SilentlyContinue | Stop-Process -Force
-    Get-AppxPackage -Name 'GooseLauncher' -ErrorAction SilentlyContinue | Remove-AppxPackage
+    foreach ($packageName in @('GooseWindows', 'GooseLauncher')) {
+        Get-AppxPackage -Name $packageName -ErrorAction SilentlyContinue | Remove-AppxPackage
+    }
     Add-AppxPackage -Path $packagePath
     if ($RestartExplorer) {
         Get-Process -Name explorer -ErrorAction SilentlyContinue | Stop-Process -Force

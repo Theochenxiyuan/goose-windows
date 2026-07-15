@@ -7,24 +7,31 @@
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap desktop4 desktop5 com rescap">
-  <Identity Name="GooseLauncher" Publisher="CN=REPLACE_WITH_SIGNING_IDENTITY" Version="0.1.0.0" ProcessorArchitecture="x64" />
+  <Identity Name="GooseWindows" Publisher="CN=REPLACE_WITH_SIGNING_IDENTITY" Version="__GOOSE_PACKAGE_VERSION__" ProcessorArchitecture="x64" />
   <Properties>
-    <DisplayName>Goose Launcher</DisplayName>
-    <PublisherDisplayName>Goose Launcher</PublisherDisplayName>
+    <DisplayName>Goose</DisplayName>
+    <PublisherDisplayName>Goose</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
   <Resources><Resource Language="zh-CN" /><Resource Language="en-US" /></Resources>
   <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
   <Applications>
-    <Application Id="App" Executable="GooseLauncher.exe" EntryPoint="Windows.FullTrustApplication">
-      <uap:VisualElements DisplayName="Goose Launcher" Description="Run Goose from Windows Explorer" BackgroundColor="transparent"
+    <Application Id="Desktop" Executable="Goose.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Goose" Description="Goose AI agent" BackgroundColor="transparent"
+                          Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <uap:Extension Category="windows.protocol"><uap:Protocol Name="goose" /></uap:Extension>
+      </Extensions>
+    </Application>
+    <Application Id="Launcher" Executable="launcher\GooseLauncher.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements AppListEntry="none" DisplayName="Goose Launcher" Description="Run Goose from Windows Explorer" BackgroundColor="transparent"
                           Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
       <Extensions>
         <uap:Extension Category="windows.protocol"><uap:Protocol Name="goosecompanion" /></uap:Extension>
         <com:Extension Category="windows.comServer">
           <com:ComServer>
-            <com:SurrogateServer DisplayName="Goose Launcher Explorer Command">
-              <com:Class Id="9F092D2E-33CD-41A5-B898-1E8F6A594A73" Path="GooseLauncher.ShellExtension.dll" ThreadingModel="Both" />
+            <com:SurrogateServer DisplayName="Goose Explorer Command">
+              <com:Class Id="9F092D2E-33CD-41A5-B898-1E8F6A594A73" Path="launcher\GooseLauncher.ShellExtension.dll" ThreadingModel="Both" />
             </com:SurrogateServer>
           </com:ComServer>
         </com:Extension>
@@ -40,4 +47,3 @@
   </Applications>
   <Capabilities><rescap:Capability Name="runFullTrust" /></Capabilities>
 </Package>
-

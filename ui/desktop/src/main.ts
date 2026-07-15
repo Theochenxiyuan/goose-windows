@@ -58,8 +58,7 @@ import { DesktopActivationRouter } from './launcherActivation/router';
 import { DesktopActivationServer } from './launcherActivation/server';
 
 function shouldSetupUpdater(): boolean {
-  // Setup updater if either the flag is enabled OR dev updates are enabled
-  return UPDATES_ENABLED || process.env.ENABLE_DEV_UPDATES === 'true';
+  return UPDATES_ENABLED;
 }
 
 // =======================================================================
@@ -2422,7 +2421,7 @@ async function appMain() {
   // Ensure Windows shims are available before any MCP processes are spawned
   await ensureWinShims();
 
-  registerUpdateIpcHandlers();
+  if (UPDATES_ENABLED) registerUpdateIpcHandlers();
 
   // Handle microphone permission requests
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {

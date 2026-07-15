@@ -13,7 +13,7 @@ Goose Desktop owns every GUI session and running turn. Desktop-mode submissions 
 - Desktop `run` activation with cwd, prompt, files, and bring-to-front behavior; task data is not placed in Desktop command-line arguments or deep links.
 - Native Goose tray with Open Goose Desktop, Open Goose CLI, Settings, and Exit Goose.
 - Terminal mode remains a direct interactive Goose CLI launch.
-- MSIX and Explorer COM scaffolding; unified Goose Desktop/CLI/Launcher packaging remains a later release phase.
+- One versioned MSIX containing Goose Desktop, the bundled CLI, Launcher, and Explorer COM integration.
 
 ## Develop
 
@@ -25,6 +25,16 @@ dotnet run --project .\tests\GooseLauncher.Core.Tests
 dotnet run --project .\src\GooseLauncher.App -- --folder "$PWD"
 ```
 
-Blank executable settings first resolve Goose Desktop and CLI from the unified installation layout. Explicit path overrides remain available for development and advanced use.
+Launcher resolves Goose Desktop and CLI only from the unified installation layout. Set `GOOSE_WINDOWS_ROOT` only when running Launcher from a development build outside the package.
+
+Build Desktop first, then create or install the unified package:
+
+```powershell
+cd ..\..\ui\desktop
+pnpm run package
+cd ..\..\integrations\windows-launcher
+.\scripts\build-msix.ps1
+.\scripts\build-msix.ps1 -Install -RestartExplorer
+```
 
 See [docs/architecture.md](docs/architecture.md) for protocol and ownership boundaries.

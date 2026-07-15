@@ -200,11 +200,31 @@ jobs:
           echo "📋 Binary files in resources/bin:"
           ls -la ./dist-windows/resources/bin/
 
+      - name: Build unified Goose Windows MSIX
+        shell: pwsh
+        env:
+          GOOSE_WINDOWS_PACKAGE_PUBLISHER: ${{ vars.WINDOWS_PACKAGE_PUBLISHER }}
+        run: |
+          $publisher = $env:GOOSE_WINDOWS_PACKAGE_PUBLISHER
+          if ([string]::IsNullOrWhiteSpace($publisher)) {
+            if ([System.Convert]::ToBoolean("${{ inputs.signing }}")) {
+              throw "WINDOWS_PACKAGE_PUBLISHER must match the production signing certificate subject."
+            }
+            $publisher = "CN=GooseWindows.Dev"
+          }
+          .\integrations\windows-launcher\scripts\build-msix.ps1 -Publisher $publisher
+
       - name: Upload unsigned distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: windows-unsigned${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
           path: ui/desktop/dist-windows/
+
+      - name: Upload unsigned unified MSIX
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: windows-msix-unsigned${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
+          path: integrations/windows-launcher/artifacts/msix/Goose_*.msix
 
   sign-desktop-windows:
     name: Sign Desktop (Windows)
@@ -219,6 +239,12 @@ jobs:
         with:
           name: windows-unsigned${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
           path: dist-windows
+
+      - name: Download unsigned unified MSIX
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: windows-msix-unsigned${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
+          path: msix
 
       - name: Azure login
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
@@ -236,6 +262,7 @@ jobs:
           files: |
             ${{ github.workspace }}/dist-windows/Goose.exe
             ${{ github.workspace }}/dist-windows/resources/bin/goose.exe
+            ${{ github.workspace }}/msix/*.msix
 
       - name: Verify signed executables
         shell: pwsh
@@ -243,7 +270,7 @@ jobs:
           $files = @(
             "dist-windows/Goose.exe",
             "dist-windows/resources/bin/goose.exe"
-          )
+          ) + @(Get-ChildItem -LiteralPath "msix" -Filter "*.msix" | ForEach-Object FullName)
           foreach ($file in $files) {
             Write-Output "Verifying signature: $file"
             $sig = Get-AuthenticodeSignature $file
@@ -266,6 +293,12 @@ jobs:
           name: Goose-win32-x64${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
           path: Goose-win32-x64${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}.zip
 
+      - name: Upload signed unified MSIX
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: Goose-windows-msix${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
+          path: msix/*.msix
+
   # When signing is disabled, package the unsigned build directly
   package-desktop-windows:
     name: Package Desktop (Windows)
@@ -279,6 +312,12 @@ jobs:
         with:
           name: windows-unsigned${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
           path: dist-windows
+
+      - name: Download unsigned unified MSIX
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: windows-msix-unsigned${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
+          path: msix
 
       - name: Create Windows zip package
         shell: bash
@@ -294,3 +333,9 @@ jobs:
         with:
           name: Goose-win32-x64${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
           path: Goose-win32-x64${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}.zip
+
+      - name: Upload unsigned unified MSIX
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: Goose-windows-msix${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
+          path: msix/*.msix

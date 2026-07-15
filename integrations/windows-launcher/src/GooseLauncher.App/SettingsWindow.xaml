@@ -20,53 +20,29 @@
           Opacity="0.68" />
     </StackPanel>
 
-    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-      <StackPanel Spacing="16">
-        <InfoBar
-            x:Name="BoundaryInfoBar"
-            IsOpen="True"
-            IsClosable="False"
-            Severity="Informational" />
+    <StackPanel Grid.Row="1" Spacing="16">
+      <InfoBar
+          x:Name="BoundaryInfoBar"
+          IsOpen="True"
+          IsClosable="False"
+          Severity="Informational" />
 
-        <Grid ColumnSpacing="8">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
-          <TextBox x:Name="CliPathTextBox" Header="Goose CLI path" />
-          <Button x:Name="BrowseCliButton" Grid.Column="1" VerticalAlignment="Bottom" Content="Browse…" Click="BrowseCli_Click" />
-          <Button x:Name="AutoCliButton" Grid.Column="2" VerticalAlignment="Bottom" Content="Auto" Click="AutoCli_Click" />
-        </Grid>
+      <ComboBox
+          x:Name="RunTargetComboBox"
+          Header="Open when running tasks"
+          HorizontalAlignment="Stretch">
+        <ComboBoxItem x:Name="DesktopTargetItem" Content="Goose Desktop" Tag="Desktop" />
+        <ComboBoxItem x:Name="TerminalTargetItem" Content="Terminal" Tag="Terminal" />
+      </ComboBox>
 
-        <Grid ColumnSpacing="8">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
-          <TextBox x:Name="DesktopPathTextBox" Header="Goose Desktop path" />
-          <Button x:Name="BrowseDesktopButton" Grid.Column="1" VerticalAlignment="Bottom" Content="Browse…" Click="BrowseDesktop_Click" />
-          <Button x:Name="AutoDesktopButton" Grid.Column="2" VerticalAlignment="Bottom" Content="Auto" Click="AutoDesktop_Click" />
-        </Grid>
+      <ToggleSwitch
+          x:Name="StartWithWindowsToggle"
+          Header="Start with Windows"
+          OffContent="Off"
+          OnContent="On" />
 
-        <ComboBox
-            x:Name="RunTargetComboBox"
-            Header="Open when running tasks"
-            HorizontalAlignment="Stretch">
-          <ComboBoxItem x:Name="DesktopTargetItem" Content="Goose Desktop" Tag="Desktop" />
-          <ComboBoxItem x:Name="TerminalTargetItem" Content="Terminal" Tag="Terminal" />
-        </ComboBox>
-
-        <ToggleSwitch
-            x:Name="StartWithWindowsToggle"
-            Header="Start with Windows"
-            OffContent="Off"
-            OnContent="On" />
-
-        <InfoBar x:Name="ResultInfoBar" IsOpen="False" IsClosable="True" />
-      </StackPanel>
-    </ScrollViewer>
+      <InfoBar x:Name="ResultInfoBar" IsOpen="False" IsClosable="True" />
+    </StackPanel>
 
     <Grid Grid.Row="2" ColumnSpacing="8">
       <Grid.ColumnDefinitions>

@@ -107,20 +107,12 @@ public sealed partial class OverlayWindow : Window
         if (_running || string.IsNullOrWhiteSpace(prompt)) return;
 
         var settings = CompanionSettingsStore.Load();
-        var installation = GooseInstallation.Locate(settings.CliPath, settings.DesktopPath);
+        var installation = GooseInstallation.Locate();
         if (installation is null)
         {
             SetError(Strings.Get(
-                "找不到 Goose CLI。请在 Goose Launcher 设置中检查路径。",
-                "Goose CLI was not found. Check the path in Goose Launcher settings."));
-            return;
-        }
-
-        if (settings.RunTarget == GooseRunTarget.Desktop && installation.DesktopPath is null)
-        {
-            SetError(Strings.Get(
-                "找不到 Goose Desktop。请在 Goose Launcher 设置中检查路径。",
-                "Goose Desktop was not found. Check the path in Goose Launcher settings."));
+                "Goose 安装不完整，请重新安装。",
+                "The Goose installation is incomplete. Reinstall Goose."));
             return;
         }
 
@@ -221,12 +213,10 @@ public sealed partial class OverlayWindow : Window
         try
         {
             var settings = CompanionSettingsStore.Load();
-            var installation = GooseInstallation.Locate(settings.CliPath, settings.DesktopPath)
-                ?? throw new FileNotFoundException(Strings.Get("Goose CLI 未找到。", "Goose CLI was not found."));
+            var installation = GooseInstallation.Locate()
+                ?? throw new FileNotFoundException(Strings.Get("Goose 安装不完整，请重新安装。", "The Goose installation is incomplete. Reinstall Goose."));
             if (settings.RunTarget == GooseRunTarget.Desktop)
             {
-                if (installation.DesktopPath is null)
-                    throw new FileNotFoundException(Strings.Get("Goose Desktop 未找到。", "Goose Desktop was not found."));
                 GooseProcessLauncher.OpenDesktop(installation);
             }
             else

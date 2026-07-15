@@ -9,6 +9,12 @@
 
 Terminal mode is independent: it launches the bundled Goose CLI with the selected cwd. Because the established CLI mode uses `goose run --text`, its task text is visible in that CLI process command line; Desktop-mode privacy guarantees do not rely on that path.
 
+## Installation layout
+
+One MSIX installs and versions the whole Windows product. Goose Desktop remains at the package root with its existing `resources\bin\goose.exe` CLI, while Launcher and its native dependencies live under `launcher`. Launcher derives both executable paths from this package layout and does not search PATH, registry protocol handlers, or unrelated Goose installations. The optional `GOOSE_WINDOWS_ROOT` override exists only for local development.
+
+The package reuses Goose Desktop artwork for the app list, Launcher, tray, and Explorer command. Desktop's upstream updater is disabled; updates must replace the unified package so Desktop, CLI, Launcher, and Explorer integration cannot drift between versions.
+
 ## Desktop activation protocol
 
 The endpoint metadata is stored below `%LOCALAPPDATA%\Goose\launcher` and contains a randomized named-pipe endpoint, protocol version, process id, and per-process authentication token. The user-profile ACL, non-global randomized endpoint, Node pipe permissions, and authentication token jointly restrict activation to the current user.

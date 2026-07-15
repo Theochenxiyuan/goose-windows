@@ -9,10 +9,7 @@ public enum GooseRunTarget
     Terminal,
 }
 
-public sealed record CompanionSettings(
-    string? CliPath = null,
-    string? DesktopPath = null,
-    GooseRunTarget RunTarget = GooseRunTarget.Desktop);
+public sealed record CompanionSettings(GooseRunTarget RunTarget = GooseRunTarget.Desktop);
 
 public static class CompanionSettingsStore
 {

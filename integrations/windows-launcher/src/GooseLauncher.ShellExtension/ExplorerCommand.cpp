@@ -168,10 +168,10 @@ HRESULT ExplorerCommand::GetIcon(IShellItemArray*, PWSTR* icon) noexcept
 {
     wchar_t path[MAX_PATH]{};
     if (!g_moduleInstance || !GetModuleFileNameW(g_moduleInstance, path, ARRAYSIZE(path))) return E_FAIL;
-    if (!PathRemoveFileSpecW(path) || !PathAppendW(path, L"Assets\\GooseLauncher.ico")) return E_FAIL;
+    if (!PathRemoveFileSpecW(path) || !PathAppendW(path, L"..\\Assets\\Goose.ico")) return E_FAIL;
     return GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES ? HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) : CopyString(path, icon);
 }
-HRESULT ExplorerCommand::GetToolTip(IShellItemArray*, PWSTR* infoTip) noexcept { return CopyString(IsChineseUi() ? L"在此位置打开 Goose Launcher" : L"Open Goose Launcher here", infoTip); }
+HRESULT ExplorerCommand::GetToolTip(IShellItemArray*, PWSTR* infoTip) noexcept { return CopyString(IsChineseUi() ? L"在此位置打开 Goose" : L"Open Goose here", infoTip); }
 HRESULT ExplorerCommand::GetCanonicalName(GUID* guid) noexcept { if (!guid) return E_POINTER; *guid = CLSID_GooseLauncherExplorerCommand; return S_OK; }
 HRESULT ExplorerCommand::GetState(IShellItemArray*, BOOL, EXPCMDSTATE* state) noexcept { CaptureInvocationOrigin(); if (!state) return E_POINTER; *state = ECS_ENABLED; return S_OK; }
 HRESULT ExplorerCommand::GetFlags(EXPCMDFLAGS* flags) noexcept { if (!flags) return E_POINTER; *flags = ECF_DEFAULT; return S_OK; }
