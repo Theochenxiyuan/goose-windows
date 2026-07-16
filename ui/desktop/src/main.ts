@@ -57,7 +57,10 @@ import { BLOCKED_PROTOCOLS, WEB_PROTOCOLS } from './utils/urlSecurity';
 import { buildCSP } from './utils/csp';
 import { DesktopActivationRouter } from './launcherActivation/router';
 import { DesktopActivationServer } from './launcherActivation/server';
-import type { LauncherSessionSelection } from './launcherActivation/protocol';
+import {
+  DesktopActivationProtocolError,
+  type LauncherSessionSelection,
+} from './launcherActivation/protocol';
 
 function shouldSetupUpdater(): boolean {
   return UPDATES_ENABLED;
@@ -976,6 +979,15 @@ const windowPowerSaveBlockers = new Map<number, number>(); // windowId -> blocke
 const pendingInitialMessages = new Map<number, string>(); // windowId -> initialMessage
 const pendingInitialMessageNoAutoSubmit = new Set<number>(); // windowIds whose initialMessage should NOT auto-submit
 const pendingLauncherSessionSelections = new Map<number, LauncherSessionSelection>();
+interface LauncherActivationWaiter {
+  requestId: string;
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timeout?: ReturnType<typeof setTimeout>;
+}
+const pendingLauncherActivations = new Map<number, LauncherActivationWaiter>();
+const LAUNCHER_RENDERER_ACK_TIMEOUT_MS = 30_000;
 let desktopActivationServer: DesktopActivationServer | undefined;
 let desktopActivationHandled = false;
 let desktopActivationFallbackTimer: ReturnType<typeof setTimeout> | undefined;
@@ -991,6 +1003,25 @@ interface CreateChatOptions {
   recipeId?: string;
   scheduledJobId?: string;
   recipeParameters?: Record<string, string>;
+  launcherActivation?: LauncherActivationWaiter;
+}
+
+function createLauncherActivationWaiter(requestId: string): LauncherActivationWaiter {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { requestId, promise, resolve, reject };
+}
+
+function takeLauncherActivation(windowId: number): LauncherActivationWaiter | undefined {
+  const activation = pendingLauncherActivations.get(windowId);
+  if (!activation) return undefined;
+  pendingLauncherActivations.delete(windowId);
+  if (activation.timeout) clearTimeout(activation.timeout);
+  return activation;
 }
 
 const createChat = async (
@@ -1008,6 +1039,7 @@ const createChat = async (
     recipeId,
     scheduledJobId,
     recipeParameters,
+    launcherActivation,
   } = options;
   const settings = getSettings();
 
@@ -1393,6 +1425,19 @@ const createChat = async (
   });
 
   const windowId = mainWindow.id;
+  if (launcherActivation) {
+    pendingLauncherActivations.set(windowId, launcherActivation);
+    launcherActivation.timeout = setTimeout(() => {
+      const pending = takeLauncherActivation(windowId);
+      pending?.reject(
+        new DesktopActivationProtocolError(
+          'renderer_timeout',
+          'Goose timed out while handing the task to the session.'
+        )
+      );
+      if (!mainWindow.isDestroyed()) mainWindow.close();
+    }, LAUNCHER_RENDERER_ACK_TIMEOUT_MS);
+  }
   const url = getAppUrl();
 
   let appPath = '/';
@@ -1496,6 +1541,12 @@ const createChat = async (
     pendingLauncherSessionSelections.delete(windowId);
     pendingDeepLinks.delete(windowId);
     reactReadyWindows.delete(windowId);
+    takeLauncherActivation(windowId)?.reject(
+      new DesktopActivationProtocolError(
+        'window_closed',
+        'The Goose window closed before it accepted the task.'
+      )
+    );
 
     if (windowPowerSaveBlockers.has(windowId)) {
       const blockerId = windowPowerSaveBlockers.get(windowId)!;
@@ -1865,10 +1916,12 @@ ipcMain.on('react-ready', (event) => {
     const initialMessage = pendingInitialMessages.get(windowId)!;
     const noAutoSubmit = pendingInitialMessageNoAutoSubmit.has(windowId);
     const launcherSessionSelection = pendingLauncherSessionSelections.get(windowId);
+    const launcherRequestId = pendingLauncherActivations.get(windowId)?.requestId;
     log.info('Sending pending initial message to window');
     window.webContents.send('set-initial-message', initialMessage, {
       noAutoSubmit,
       launcherSessionSelection,
+      launcherRequestId,
     });
     pendingInitialMessages.delete(windowId);
     pendingInitialMessageNoAutoSubmit.delete(windowId);
@@ -1890,6 +1943,33 @@ ipcMain.on('react-ready', (event) => {
       log.error('Error processing pending deep link:', error);
     }
   }
+});
+
+ipcMain.on('launcher-activation-result', (event, result: unknown) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window || !result || typeof result !== 'object') return;
+
+  const value = result as Record<string, unknown>;
+  const pending = pendingLauncherActivations.get(window.id);
+  if (!pending || value.requestId !== pending.requestId) return;
+
+  const activation = takeLauncherActivation(window.id);
+  if (!activation) return;
+  if (value.status === 'accepted') {
+    activation.resolve();
+    return;
+  }
+
+  const code = typeof value.code === 'string' ? value.code : 'renderer_rejected';
+  activation.reject(
+    new DesktopActivationProtocolError(
+      code,
+      code === 'session_creation_failed'
+        ? 'Goose could not create the requested session.'
+        : 'Goose could not submit the task to the requested session.'
+    )
+  );
+  if (!window.isDestroyed()) window.close();
 });
 
 ipcMain.handle('open-external', async (_event, url: string) => {
@@ -2488,8 +2568,23 @@ async function appMain() {
 
   if (process.platform === 'win32') {
     const activationServer = new DesktopActivationServer({
-      router: new DesktopActivationRouter((options) => createChat(app, options)),
-      onAccepted: (request) => {
+      router: new DesktopActivationRouter(async (options) => {
+        const { launcherRequestId, ...chatOptions } = options;
+        const activation = launcherRequestId
+          ? createLauncherActivationWaiter(launcherRequestId)
+          : undefined;
+        const window = await createChat(app, {
+          ...chatOptions,
+          launcherActivation: activation,
+        });
+        return window
+          ? {
+              window,
+              activationAccepted: activation?.promise,
+            }
+          : undefined;
+      }),
+      onHandled: (request) => {
         if (request.action !== 'run' && request.action !== 'open') return;
         desktopActivationHandled = true;
         if (desktopActivationFallbackTimer) {

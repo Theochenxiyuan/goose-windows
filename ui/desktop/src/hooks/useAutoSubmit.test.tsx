@@ -90,4 +90,31 @@ describe('useAutoSubmit', () => {
     expect(handleSubmit).toHaveBeenCalledWith(initialMessage);
     expect(dispatchEventSpy).toHaveBeenCalledTimes(1);
   });
+
+  it('forwards submission lifecycle callbacks for a fresh session', () => {
+    const onSubmitStarted = vi.fn();
+    const onSubmitRejected = vi.fn();
+    const handleSubmit = vi.fn((_input, options) => options?.onStarted?.());
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <MemoryRouter initialEntries={['/pair?resumeSessionId=sess-1']}>{children}</MemoryRouter>
+    );
+
+    renderHook(
+      () =>
+        useAutoSubmit({
+          sessionId: 'sess-1',
+          session: makeSession(),
+          messages: [],
+          chatState: ChatState.Idle,
+          initialMessage,
+          handleSubmit,
+          onSubmitStarted,
+          onSubmitRejected,
+        }),
+      { wrapper }
+    );
+
+    expect(onSubmitStarted).toHaveBeenCalledOnce();
+    expect(onSubmitRejected).not.toHaveBeenCalled();
+  });
 });

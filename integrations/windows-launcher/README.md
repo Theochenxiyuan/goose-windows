@@ -14,6 +14,7 @@ Goose Desktop owns every GUI session and running turn. Desktop-mode submissions 
 - Native Goose tray with Open Goose Desktop, Open Goose CLI, Settings, and Exit Goose.
 - Terminal mode remains a direct interactive Goose CLI launch.
 - One versioned MSIX containing Goose Desktop, the bundled CLI, Launcher, and Explorer COM integration.
+- App Installer feeds for stable standard and CUDA packages, with OS-managed update checks.
 
 ## Develop
 
@@ -21,7 +22,7 @@ Requirements: Windows 10/11, .NET 8 SDK or newer, and the Goose Desktop UI toolc
 
 ```powershell
 dotnet build .\GooseLauncher.slnx
-dotnet run --project .\tests\GooseLauncher.Core.Tests
+dotnet test .\tests\GooseLauncher.Core.Tests
 dotnet run --project .\src\GooseLauncher.App -- --folder "$PWD"
 ```
 
@@ -49,4 +50,4 @@ cd ..\..\integrations\windows-launcher
 
 Desktop packaging prepares the Windows runtime before Electron packaging. The MSIX build refuses to continue unless the packaged runtime contains Goose CLI, `uv`, `uvx`, and the portable Node `npx` bootstrapper.
 
-See [docs/architecture.md](docs/architecture.md) for protocol and ownership boundaries.
+See [docs/architecture.md](docs/architecture.md) for protocol and ownership boundaries and [docs/updates.md](docs/updates.md) for package identities, release feeds, and ZIP migration.

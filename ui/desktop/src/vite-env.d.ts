@@ -54,6 +54,7 @@ declare global {
     'add-active-session': CustomEvent<{
       sessionId: string;
       initialMessage?: string;
+      launcherRequestId?: string;
     }>;
     'clear-initial-message': CustomEvent<{
       sessionId: string;

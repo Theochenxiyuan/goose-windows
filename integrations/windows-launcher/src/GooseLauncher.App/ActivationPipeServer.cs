@@ -7,11 +7,22 @@ using GooseLauncher.Core;
 
 namespace GooseLauncher.App;
 
+internal enum ActivationAcceptance : byte
+{
+    Rejected = 0,
+    Accepted = 1,
+    Busy = 2,
+}
+
 internal sealed class ActivationPipeServer : IAsyncDisposable
 {
     private const int MaxPayloadBytes = 32 * 1024;
+    private readonly Func<ActivationRequest, Task<ActivationAcceptance>> _activationHandler;
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _listener;
+
+    internal ActivationPipeServer(Func<ActivationRequest, Task<ActivationAcceptance>> activationHandler) =>
+        _activationHandler = activationHandler;
 
     internal static string PipeName
     {
@@ -22,7 +33,6 @@ internal sealed class ActivationPipeServer : IAsyncDisposable
         }
     }
 
-    internal event Action<ActivationRequest>? ActivationReceived;
     internal event Action<string>? DiagnosticReceived;
 
     internal void Start() => _listener ??= ListenAsync(_shutdown.Token);
@@ -36,8 +46,8 @@ internal sealed class ActivationPipeServer : IAsyncDisposable
                 await using var pipe = new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Message, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await pipe.WaitForConnectionAsync(cancellationToken);
                 var request = await ReadAsync(pipe, cancellationToken);
-                ActivationReceived?.Invoke(request);
-                await pipe.WriteAsync(new byte[] { 1 }, cancellationToken);
+                var accepted = await _activationHandler(request);
+                await pipe.WriteAsync(new byte[] { (byte)accepted }, cancellationToken);
                 await pipe.FlushAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }

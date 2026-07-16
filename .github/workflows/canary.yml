@@ -110,6 +110,7 @@ jobs:
     with:
       version: ${{ needs.prepare-version.outputs.version }}
       signing: false
+      update_channel: canary
 
   bundle-desktop-windows-cuda:
     needs: [prepare-version]
@@ -118,6 +119,7 @@ jobs:
       version: ${{ needs.prepare-version.outputs.version }}
       signing: false
       windows_variant: cuda
+      update_channel: canary
 
   # ------------------------------------
   # 7) Create/Update GitHub Release
@@ -145,6 +147,7 @@ jobs:
             goose-*.tar.gz
             goose-*.zip
             Goose*.zip
+            *.msix
             *.deb
             *.rpm
             *.flatpak
@@ -162,6 +165,7 @@ jobs:
             goose-*.tar.gz
             goose-*.zip
             Goose*.zip
+            *.msix
             *.deb
             *.rpm
             *.flatpak

@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: 'standard'
+      update_channel:
+        description: 'App Installer release channel'
+        required: false
+        type: string
+        default: 'stable'
   workflow_call:
     inputs:
       version:
@@ -34,6 +39,11 @@ on:
         required: false
         type: string
         default: 'standard'
+      update_channel:
+        description: 'App Installer release channel'
+        required: false
+        type: string
+        default: 'stable'
 
 # Permissions required for OIDC authentication with Azure Trusted Signing
 permissions:
@@ -59,6 +69,17 @@ jobs:
 
       - name: Install pnpm
         run: npm install -g pnpm@10.30.3
+
+      - name: Apply build version
+        if: ${{ inputs.version != '' }}
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          $cargo = Get-Content -LiteralPath "Cargo.toml" -Raw
+          $cargo = $cargo -replace '(?m)^version = ".*"$', "version = `"$env:VERSION`""
+          [IO.File]::WriteAllText((Join-Path $PWD "Cargo.toml"), $cargo)
+          npm --prefix ui/desktop pkg set "version=$env:VERSION"
 
       - name: Cache node_modules
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -212,7 +233,15 @@ jobs:
             }
             $publisher = "CN=GooseWindows.Dev"
           }
-          .\integrations\windows-launcher\scripts\build-msix.ps1 -Publisher $publisher
+          $channel = "${{ inputs.update_channel }}"
+          $revision = if ($channel -eq "canary") { [Math]::Max(1, [int]$env:GITHUB_RUN_NUMBER % 65535) } else { 0 }
+          $updateBaseUri = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/releases/download/$channel"
+          .\integrations\windows-launcher\scripts\build-msix.ps1 `
+            -Publisher $publisher `
+            -Variant "${{ inputs.windows_variant }}" `
+            -UpdateChannel $channel `
+            -PackageRevision $revision `
+            -UpdateBaseUri $updateBaseUri
 
       - name: Upload unsigned distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -224,7 +253,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: windows-msix-unsigned${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
-          path: integrations/windows-launcher/artifacts/msix/Goose_*.msix
+          path: |
+            integrations/windows-launcher/artifacts/msix/*.msix
+            integrations/windows-launcher/artifacts/msix/*.appinstaller
 
   sign-desktop-windows:
     name: Sign Desktop (Windows)
@@ -297,7 +328,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: Goose-windows-msix${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
-          path: msix/*.msix
+          path: |
+            msix/*.msix
+            msix/*.appinstaller
 
   # When signing is disabled, package the unsigned build directly
   package-desktop-windows:
@@ -338,4 +371,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: Goose-windows-msix${{ inputs.windows_variant == 'cuda' && '-cuda' || '' }}
-          path: msix/*.msix
+          path: |
+            msix/*.msix
+            msix/*.appinstaller

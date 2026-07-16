@@ -2,6 +2,13 @@
 param(
     [string]$Publisher = 'CN=GooseWindows.Dev',
     [string]$DesktopSourceDir,
+    [ValidateSet('standard', 'cuda')]
+    [string]$Variant = 'standard',
+    [ValidateSet('stable', 'canary')]
+    [string]$UpdateChannel = 'stable',
+    [ValidateRange(-1, 65535)]
+    [int]$PackageRevision = -1,
+    [string]$UpdateBaseUri,
     [switch]$Sign,
     [switch]$Install,
     [switch]$RestartExplorer
@@ -19,6 +26,7 @@ $launcherStageDir = Join-Path $stageDir 'launcher'
 $priInputDir = Join-Path $artifactRoot 'pri-input'
 $launcherPriInputDir = Join-Path $priInputDir 'launcher'
 $manifestTemplatePath = Join-Path $launcherRoot 'packaging\Package.appxmanifest.template'
+$appInstallerTemplatePath = Join-Path $launcherRoot 'packaging\Package.appinstaller.template'
 $desktopPackagePath = Join-Path $workspaceRoot 'ui\desktop\package.json'
 $desktopImagesDir = Join-Path $workspaceRoot 'ui\desktop\src\images'
 if ([string]::IsNullOrWhiteSpace($DesktopSourceDir)) {
@@ -27,11 +35,31 @@ if ([string]::IsNullOrWhiteSpace($DesktopSourceDir)) {
 $DesktopSourceDir = [IO.Path]::GetFullPath($DesktopSourceDir)
 
 $desktopPackage = Get-Content -LiteralPath $desktopPackagePath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($desktopPackage.version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?$') {
+if ($desktopPackage.version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:[-+].*)?$') {
     throw "Desktop version is not compatible with MSIX: $($desktopPackage.version)"
 }
-$packageVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$(if ($Matches[4]) { $Matches[4] } else { '0' })"
-$packagePath = Join-Path $artifactRoot "Goose_${packageVersion}_x64.msix"
+$versionParts = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+if ($versionParts | Where-Object { $_ -gt 65535 }) {
+    throw "Every MSIX version component must be at most 65535: $($desktopPackage.version)"
+}
+$revision = if ($PackageRevision -ge 0) { $PackageRevision } elseif ($Matches[4]) { [int]$Matches[4] } else { 0 }
+$packageVersion = "$($versionParts[0]).$($versionParts[1]).$($versionParts[2]).$revision"
+$packageIdentity = 'GooseWindows'
+$displayName = 'Goose'
+$artifactName = 'Goose'
+if ($Variant -eq 'cuda') {
+    $packageIdentity += '.CUDA'
+    $displayName += ' CUDA'
+    $artifactName += '.CUDA'
+}
+if ($UpdateChannel -eq 'canary') {
+    $packageIdentity += '.Canary'
+    $displayName += ' Canary'
+    $artifactName += '.Canary'
+}
+$packageFileName = "${artifactName}_${packageVersion}_x64.msix"
+$appInstallerFileName = "${artifactName}.appinstaller"
+$packagePath = Join-Path $artifactRoot $packageFileName
 
 function Assert-WorkspacePath([string]$Path) {
     $resolved = [IO.Path]::GetFullPath($Path)
@@ -134,7 +162,10 @@ Get-ChildItem -LiteralPath $launcherStageDir -File -Filter '*.pri' |
     ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $launcherPriInputDir -Force }
 
 $manifestTemplate = Get-Content -LiteralPath $manifestTemplatePath -Raw -Encoding UTF8
-$manifest = $manifestTemplate.Replace('CN=REPLACE_WITH_SIGNING_IDENTITY', $Publisher).Replace('__GOOSE_PACKAGE_VERSION__', $packageVersion)
+$manifest = $manifestTemplate.Replace('CN=REPLACE_WITH_SIGNING_IDENTITY', $Publisher).
+    Replace('__GOOSE_PACKAGE_VERSION__', $packageVersion).
+    Replace('__GOOSE_PACKAGE_IDENTITY__', $packageIdentity).
+    Replace('__GOOSE_DISPLAY_NAME__', $displayName)
 [IO.File]::WriteAllText((Join-Path $stageDir 'AppxManifest.xml'), $manifest, [Text.UTF8Encoding]::new($false))
 
 $sdkBinRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
@@ -154,6 +185,19 @@ if ($LASTEXITCODE -ne 0) { throw "MakePri createconfig failed with exit code $LA
 if ($LASTEXITCODE -ne 0) { throw "MakePri new failed with exit code $LASTEXITCODE. See $makePriLog" }
 Write-Output 'Package resources generated.'
 Invoke-Checked $makeAppx @('pack', '/d', $stageDir, '/p', $packagePath, '/o', '/h', 'SHA256')
+
+if (-not [string]::IsNullOrWhiteSpace($UpdateBaseUri)) {
+    $UpdateBaseUri = $UpdateBaseUri.TrimEnd('/')
+    $parsedUpdateBaseUri = [Uri]$UpdateBaseUri
+    if ($parsedUpdateBaseUri.Scheme -ne 'https') { throw 'The App Installer update base URI must use HTTPS.' }
+    $appInstallerTemplate = Get-Content -LiteralPath $appInstallerTemplatePath -Raw -Encoding UTF8
+    $appInstaller = $appInstallerTemplate.Replace('CN=REPLACE_WITH_SIGNING_IDENTITY', $Publisher).
+        Replace('__GOOSE_PACKAGE_VERSION__', $packageVersion).
+        Replace('__GOOSE_PACKAGE_IDENTITY__', $packageIdentity).
+        Replace('__GOOSE_APPINSTALLER_URI__', "$UpdateBaseUri/$appInstallerFileName").
+        Replace('__GOOSE_PACKAGE_URI__', "$UpdateBaseUri/$packageFileName")
+    [IO.File]::WriteAllText((Join-Path $artifactRoot $appInstallerFileName), $appInstaller, [Text.UTF8Encoding]::new($false))
+}
 
 if ($Install) { $Sign = $true }
 if ($Sign) {
@@ -175,7 +219,7 @@ if ($Install) {
         if ($elevated.ExitCode -ne 0) { throw "Development certificate installation failed with exit code $($elevated.ExitCode)" }
     }
     Get-Process -Name 'GooseLauncher' -ErrorAction SilentlyContinue | Stop-Process -Force
-    foreach ($packageName in @('GooseWindows', 'GooseLauncher')) {
+    foreach ($packageName in @('GooseWindows', 'GooseWindows.CUDA', 'GooseWindows.Canary', 'GooseWindows.CUDA.Canary', 'GooseLauncher')) {
         Get-AppxPackage -Name $packageName -ErrorAction SilentlyContinue | Remove-AppxPackage
     }
     Add-AppxPackage -Path $packagePath
@@ -186,3 +230,6 @@ if ($Install) {
 }
 
 Write-Output "MSIX: $packagePath"
+if (-not [string]::IsNullOrWhiteSpace($UpdateBaseUri)) {
+    Write-Output "App Installer: $(Join-Path $artifactRoot $appInstallerFileName)"
+}

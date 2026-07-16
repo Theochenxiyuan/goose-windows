@@ -29,6 +29,7 @@ interface AppLayoutContentProps {
     sessionId: string;
     initialMessage?: UserInput;
     noAutoSubmit?: boolean;
+    launcherRequestId?: string;
   }>;
 }
 
@@ -122,6 +123,7 @@ interface AppLayoutProps {
     sessionId: string;
     initialMessage?: UserInput;
     noAutoSubmit?: boolean;
+    launcherRequestId?: string;
   }>;
 }
 

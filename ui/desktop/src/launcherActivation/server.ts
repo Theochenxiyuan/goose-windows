@@ -24,6 +24,7 @@ export interface DesktopActivationEndpoint {
 interface DesktopActivationServerOptions {
   router: DesktopActivationRouter;
   onAccepted?: (request: DesktopActivationRequest) => void;
+  onHandled?: (request: DesktopActivationRequest) => void;
   onError?: (code: string) => void;
 }
 
@@ -71,6 +72,7 @@ export class DesktopActivationServer {
   private readonly authToken = crypto.randomBytes(32).toString('hex');
   private readonly pipeName = `\\\\.\\pipe\\goose-desktop-${crypto.randomUUID()}`;
   private readonly responses = new Map<string, DesktopActivationResponse>();
+  private readonly inFlightResponses = new Map<string, Promise<DesktopActivationResponse>>();
   private readonly sockets = new Set<net.Socket>();
   private server: net.Server | undefined;
 
@@ -149,6 +151,21 @@ export class DesktopActivationServer {
     const previous = this.responses.get(request.requestId);
     if (previous) return previous;
 
+    const inFlight = this.inFlightResponses.get(request.requestId);
+    if (inFlight) return inFlight;
+
+    const handling = this.routeAndCache(request);
+    this.inFlightResponses.set(request.requestId, handling);
+    try {
+      return await handling;
+    } finally {
+      this.inFlightResponses.delete(request.requestId);
+    }
+  }
+
+  private async routeAndCache(
+    request: DesktopActivationRequest
+  ): Promise<DesktopActivationResponse> {
     let response: DesktopActivationResponse;
     try {
       response = await this.options.router.route(request);
@@ -157,6 +174,7 @@ export class DesktopActivationServer {
       const message = error instanceof Error ? error.message : 'Activation failed.';
       response = rejectedResponse(request.requestId, code, message);
     }
+    this.options.onHandled?.(request);
     this.responses.set(request.requestId, response);
     if (this.responses.size > 128) this.responses.delete(this.responses.keys().next().value!);
     if (response.status === 'accepted') this.options.onAccepted?.(request);

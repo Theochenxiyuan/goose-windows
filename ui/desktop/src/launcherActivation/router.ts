@@ -23,11 +23,17 @@ export interface LauncherChatOptions {
   initialMessageNoAutoSubmit?: boolean;
   dir?: string;
   launcherSessionSelection?: LauncherSessionSelection;
+  launcherRequestId?: string;
+}
+
+export interface LauncherChat {
+  window: LauncherChatWindow;
+  activationAccepted?: Promise<void>;
 }
 
 export type CreateLauncherChat = (
   options: LauncherChatOptions
-) => Promise<LauncherChatWindow | undefined>;
+) => Promise<LauncherChat | undefined>;
 
 function samePath(left: string, right: string): boolean {
   return process.platform === 'win32'
@@ -89,7 +95,7 @@ export class DesktopActivationRouter {
       cwd = await validatePaths(request);
     }
 
-    const window = await this.createChat({
+    const chat = await this.createChat({
       dir: cwd,
       initialMessage:
         request.action === 'run'
@@ -97,7 +103,9 @@ export class DesktopActivationRouter {
           : undefined,
       initialMessageNoAutoSubmit: false,
       launcherSessionSelection: request.sessionSelection,
+      launcherRequestId: request.action === 'run' ? request.requestId : undefined,
     });
+    const window = chat?.window;
     if (!window || window.isDestroyed()) {
       throw new DesktopActivationProtocolError(
         'window_creation_failed',
@@ -109,6 +117,16 @@ export class DesktopActivationRouter {
       window.show();
       window.focus();
       window.moveTop();
+    }
+
+    if (request.action === 'run') {
+      if (!chat.activationAccepted) {
+        throw new DesktopActivationProtocolError(
+          'renderer_ack_unavailable',
+          'Goose could not confirm that the task reached the session.'
+        );
+      }
+      await chat.activationAccepted;
     }
 
     return {

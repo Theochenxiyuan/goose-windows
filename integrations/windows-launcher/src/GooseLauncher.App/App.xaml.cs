@@ -43,9 +43,7 @@ public partial class App : Application
 
         _overlay = new OverlayWindow();
 
-        _pipeServer = new ActivationPipeServer();
-        _pipeServer.ActivationReceived += activation =>
-            _overlay.DispatcherQueue.TryEnqueue(() => _overlay.ShowActivation(activation));
+        _pipeServer = new ActivationPipeServer(DispatchActivationAsync);
         _pipeServer.DiagnosticReceived += message =>
             _overlay.DispatcherQueue.TryEnqueue(() => _overlay.SetDiagnostic(message));
         _pipeServer.Start();
@@ -61,6 +59,22 @@ public partial class App : Application
             ShowSettings(_overlay.AppWindow);
         else if (!launchToTray)
             _overlay.ShowActivation(request ?? ActivationRequest.Create(Environment.CurrentDirectory));
+    }
+
+    private Task<ActivationAcceptance> DispatchActivationAsync(ActivationRequest activation)
+    {
+        if (_overlay is null) return Task.FromResult(ActivationAcceptance.Rejected);
+
+        var completion = new TaskCompletionSource<ActivationAcceptance>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_overlay.DispatcherQueue.TryEnqueue(() =>
+        {
+            try { completion.SetResult(_overlay.TryShowActivation(activation)); }
+            catch (Exception error) { completion.SetException(error); }
+        }))
+        {
+            completion.SetResult(ActivationAcceptance.Rejected);
+        }
+        return completion.Task;
     }
 
     private async Task RedirectAndExitAsync(ActivationRequest request)

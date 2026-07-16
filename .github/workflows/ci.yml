@@ -100,6 +100,44 @@ jobs:
         env:
           CARGO_INCREMENTAL: "0"
 
+  windows-launcher:
+    name: Test Windows Launcher and Shell Extension
+    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1  # v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: 24.10.0
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce  # v2
+
+      - name: Test Launcher
+        shell: pwsh
+        run: dotnet test .\integrations\windows-launcher\tests\GooseLauncher.Core.Tests\GooseLauncher.Core.Tests.csproj --configuration Release
+
+      - name: Test Desktop activation contract
+        shell: pwsh
+        working-directory: ui/desktop
+        run: |
+          npm install --global pnpm@10.30.3
+          pnpm install --frozen-lockfile
+          pnpm run test:run -- src/launcherActivation
+
+      - name: Build Explorer Shell Extension
+        shell: pwsh
+        run: msbuild .\integrations\windows-launcher\src\GooseLauncher.ShellExtension\GooseLauncher.ShellExtension.vcxproj /p:Configuration=Release /p:Platform=x64
+
   rust-msrv:
     name: Check MSRV
     runs-on: ubuntu-latest

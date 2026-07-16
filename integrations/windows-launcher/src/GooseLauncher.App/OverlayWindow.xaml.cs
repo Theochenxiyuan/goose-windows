@@ -12,6 +12,7 @@ namespace GooseLauncher.App;
 
 public sealed partial class OverlayWindow : Window
 {
+    private const int MaximumPendingActivations = 8;
     private const int DefaultWidth = 540;
     private const int DefaultHeight = 420;
     private const int MinimumWidth = 420;
@@ -28,6 +29,7 @@ public sealed partial class OverlayWindow : Window
     private static readonly nint WindowTopmost = new(-1);
 
     private readonly nint _windowHandle;
+    private readonly Queue<ActivationRequest> _pendingActivations = new();
     private ActivationRequest _activation = ActivationRequest.Create(Environment.CurrentDirectory);
     private CancellationTokenSource? _runCancellation;
     private bool _running;
@@ -76,16 +78,31 @@ public sealed partial class OverlayWindow : Window
         UpdateRunButton();
     }
 
-    internal void ShowActivation(ActivationRequest request)
+    internal ActivationAcceptance TryShowActivation(ActivationRequest request)
     {
         if (_running)
         {
+            if (_pendingActivations.Count >= MaximumPendingActivations)
+            {
+                App.Instance?.ShowNotification(
+                    Strings.Get("Goose 任务队列已满", "Goose task queue is full"),
+                    Strings.Get("请稍后重试。", "Try again in a moment."));
+                return ActivationAcceptance.Busy;
+            }
+
+            _pendingActivations.Enqueue(request);
             App.Instance?.ShowNotification(
-                Strings.Get("Goose 任务正在运行", "Goose task is running"),
-                Strings.Get("当前任务完成后即可新建任务。", "A new task can be started after the current task finishes."));
-            return;
+                Strings.Get("已加入 Goose 队列", "Added to the Goose queue"),
+                Strings.Get("当前任务被接管后将打开下一个请求。", "The next request will open after the current task is handed off."));
+            return ActivationAcceptance.Accepted;
         }
 
+        ShowActivation(request);
+        return ActivationAcceptance.Accepted;
+    }
+
+    internal void ShowActivation(ActivationRequest request)
+    {
         var contextChanged = !string.Equals(_activation.Folder, request.Folder, StringComparison.OrdinalIgnoreCase) ||
             !_activation.Files.SequenceEqual(request.Files, StringComparer.OrdinalIgnoreCase);
         _activation = request;
@@ -177,7 +194,14 @@ public sealed partial class OverlayWindow : Window
         _running = false;
         PromptTextBox.Text = string.Empty;
         SetSubmitting(false);
+        ShowNextPendingActivation();
         return Task.CompletedTask;
+    }
+
+    private void ShowNextPendingActivation()
+    {
+        if (_running || _pendingActivations.Count == 0) return;
+        ShowActivation(_pendingActivations.Dequeue());
     }
 
     private void SetSubmitting(bool submitting)
@@ -494,6 +518,7 @@ public sealed partial class OverlayWindow : Window
 
     private Task HideOverlayAsync()
     {
+        var cancelledRun = _running;
         if (_running)
         {
             _runCancellation?.Cancel();
@@ -501,6 +526,7 @@ public sealed partial class OverlayWindow : Window
             SetSubmitting(false);
         }
         AppWindow.Hide();
+        if (cancelledRun) ShowNextPendingActivation();
         return Task.CompletedTask;
     }
 

@@ -8,7 +8,7 @@ namespace GooseLauncher.Core;
 public sealed class DesktopActivationClient
 {
     private const string PipePrefix = @"\\.\pipe\";
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(45);
     private readonly string _endpointPath;
     private readonly Action<GooseInstallation> _startDesktop;
 

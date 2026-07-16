@@ -13,7 +13,11 @@ import {
   type UserInput,
 } from '../types/message';
 import { errorMessage } from '../utils/conversionUtils';
-import type { UseChatSessionParams, UseChatSessionResult } from './useChatSessionTypes';
+import type {
+  SubmitMessageOptions,
+  UseChatSessionParams,
+  UseChatSessionResult,
+} from './useChatSessionTypes';
 import { resolveAcpElicitationRequest } from '../acp/elicitationRequests';
 import { acpChatSessionController } from '../acp/chatSessionController';
 import {
@@ -150,8 +154,9 @@ export function useChatSession({
   }, [sessionId, onSessionLoaded]);
 
   const handleSubmit = useCallback(
-    async (input: UserInput) => {
+    async (input: UserInput, options?: SubmitMessageOptions) => {
       if (isAcpRecovering()) {
+        options?.onRejected?.();
         return;
       }
 
@@ -166,6 +171,7 @@ export function useChatSession({
         currentSnapshot.chatState === ChatState.Compacting ||
         currentSnapshot.pendingCancelPromptAttemptId !== null
       ) {
+        options?.onRejected?.();
         return;
       }
 
@@ -175,6 +181,7 @@ export function useChatSession({
       const clearsConversation = hasNewMessage && isClearCommand(userMessage);
 
       if (!hasNewMessage && !hasExistingMessages) {
+        options?.onRejected?.();
         return;
       }
 
@@ -196,7 +203,9 @@ export function useChatSession({
         acpChatSessionActions.setMessages(sessionId, messagesForStore);
       }
 
-      await submitToAcpSession(sessionId, newMessage);
+      const submission = submitToAcpSession(sessionId, newMessage);
+      options?.onStarted?.();
+      await submission;
     },
     [getCurrentSnapshot, sessionId, submitToAcpSession]
   );

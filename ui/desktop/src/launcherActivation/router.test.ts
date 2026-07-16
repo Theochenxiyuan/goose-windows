@@ -22,7 +22,7 @@ describe('Desktop activation routing', () => {
     };
     const router = new DesktopActivationRouter(async (value) => {
       options = value;
-      return window;
+      return { window, activationAccepted: Promise.resolve() };
     });
     const request: DesktopActivationRequest = {
       protocolVersion: DESKTOP_ACTIVATION_PROTOCOL_VERSION,
@@ -44,6 +44,7 @@ describe('Desktop activation routing', () => {
     expect(options).toMatchObject({
       dir: cwd,
       initialMessageNoAutoSubmit: false,
+      launcherRequestId: 'request-1',
       launcherSessionSelection: {
         provider: 'chatgpt_codex',
         model: 'gpt-5.4',
@@ -53,6 +54,48 @@ describe('Desktop activation routing', () => {
     expect(options?.initialMessage).toContain(file);
     expect(window.show).toHaveBeenCalledOnce();
     expect(window.focus).toHaveBeenCalledOnce();
+    await fs.rm(cwd, { recursive: true });
+  });
+
+  it('does not accept a run until the renderer confirms submission started', async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'goose-launcher-ack-'));
+    let confirmSubmission!: () => void;
+    const activationAccepted = new Promise<void>((resolve) => {
+      confirmSubmission = resolve;
+    });
+    const routeSettled = vi.fn();
+    const router = new DesktopActivationRouter(async () => ({
+      window: {
+        isDestroyed: () => false,
+        isMinimized: () => false,
+        restore: vi.fn(),
+        show: vi.fn(),
+        focus: vi.fn(),
+        moveTop: vi.fn(),
+      },
+      activationAccepted,
+    }));
+
+    const routing = router
+      .route({
+        protocolVersion: DESKTOP_ACTIVATION_PROTOCOL_VERSION,
+        requestId: 'request-ack',
+        action: 'run',
+        authToken: 'unused',
+        cwd,
+        prompt: 'test',
+        files: [],
+        bringToFront: true,
+      })
+      .then(routeSettled);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(routeSettled).not.toHaveBeenCalled();
+    confirmSubmission();
+    await routing;
+    expect(routeSettled).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'request-ack', status: 'accepted' })
+    );
     await fs.rm(cwd, { recursive: true });
   });
 

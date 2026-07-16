@@ -19,7 +19,12 @@ interface UseAutoSubmitProps {
   chatState: ChatState;
   initialMessage: UserInput | undefined;
   canAutoSubmit?: boolean;
-  handleSubmit: (input: UserInput) => void;
+  handleSubmit: (
+    input: UserInput,
+    options?: { onStarted?: () => void; onRejected?: () => void }
+  ) => void;
+  onSubmitStarted?: () => void;
+  onSubmitRejected?: () => void;
 }
 
 interface UseAutoSubmitReturn {
@@ -34,6 +39,8 @@ export function useAutoSubmit({
   initialMessage,
   canAutoSubmit = true,
   handleSubmit,
+  onSubmitStarted,
+  onSubmitRejected,
 }: UseAutoSubmitProps): UseAutoSubmitReturn {
   const [searchParams] = useSearchParams();
   const hasAutoSubmittedRef = useRef(false);
@@ -83,7 +90,14 @@ export function useAutoSubmit({
     if (initialMessage && session.message_count === 0 && messages.length === 0) {
       if (!hasUnfilledParameters(session)) {
         hasAutoSubmittedRef.current = true;
-        handleSubmit(initialMessage);
+        if (onSubmitStarted || onSubmitRejected) {
+          handleSubmit(initialMessage, {
+            onStarted: onSubmitStarted,
+            onRejected: onSubmitRejected,
+          });
+        } else {
+          handleSubmit(initialMessage);
+        }
         clearInitialMessage();
       }
       return;
@@ -113,6 +127,8 @@ export function useAutoSubmit({
     initialMessage,
     searchParams,
     handleSubmit,
+    onSubmitStarted,
+    onSubmitRejected,
     sessionId,
     messages.length,
     chatState,

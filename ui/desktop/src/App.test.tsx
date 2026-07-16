@@ -158,6 +158,7 @@ const mockElectron = {
   on: vi.fn(),
   off: vi.fn(),
   reactReady: vi.fn(),
+  completeLauncherActivation: vi.fn(),
   getAllowedExtensions: vi.fn().mockResolvedValue([]),
   platform: 'darwin',
   createChatWindow: vi.fn(),

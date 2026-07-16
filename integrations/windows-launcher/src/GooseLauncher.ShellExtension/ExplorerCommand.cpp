@@ -18,6 +18,13 @@ namespace
     constexpr DWORD MaxFiles = 8;
     constexpr DWORD PipeTimeoutMs = 700;
 
+    enum class ActivationResult : BYTE
+    {
+        Unavailable = 0,
+        Accepted = 1,
+        Busy = 2,
+    };
+
     bool IsChineseUi() noexcept { return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE; }
 
     HRESULT CopyString(const wchar_t* source, PWSTR* destination) noexcept
@@ -117,18 +124,22 @@ namespace
         return json + L"]";
     }
 
-    bool SendWarmActivation(const std::wstring& folder, const std::vector<std::wstring>& files, const POINT cursor)
+    ActivationResult SendWarmActivation(const std::wstring& folder, const std::vector<std::wstring>& files, const POINT cursor)
     {
-        const auto pipeName = CurrentUserPipeName(); if (pipeName.empty()) return false;
+        const auto pipeName = CurrentUserPipeName(); if (pipeName.empty()) return ActivationResult::Unavailable;
         const auto filesJson = files.empty() ? std::wstring{} : L",\"files\":" + SerializeFiles(files);
         const auto json = L"{\"protocolVersion\":1,\"type\":\"show_prompt\",\"folder\":\"" + JsonEscape(folder) + L"\"" + filesJson + L",\"x\":" + std::to_wstring(cursor.x) + L",\"y\":" + std::to_wstring(cursor.y) + L"}";
         const auto payload = Utf8(json);
-        if (payload.empty() || payload.size() > 32 * 1024) return false;
+        if (payload.empty() || payload.size() > 32 * 1024) return ActivationResult::Unavailable;
         std::vector<BYTE> framed(sizeof(DWORD) + payload.size());
         const auto length = static_cast<DWORD>(payload.size());
         std::memcpy(framed.data(), &length, sizeof(length)); std::memcpy(framed.data() + sizeof(length), payload.data(), payload.size());
         BYTE ack = 0; DWORD read = 0;
-        return CallNamedPipeW(pipeName.c_str(), framed.data(), static_cast<DWORD>(framed.size()), &ack, sizeof(ack), &read, PipeTimeoutMs) && read == 1 && ack == 1;
+        if (!CallNamedPipeW(pipeName.c_str(), framed.data(), static_cast<DWORD>(framed.size()), &ack, sizeof(ack), &read, PipeTimeoutMs) || read != 1)
+            return ActivationResult::Unavailable;
+        if (ack == static_cast<BYTE>(ActivationResult::Accepted)) return ActivationResult::Accepted;
+        if (ack == static_cast<BYTE>(ActivationResult::Busy)) return ActivationResult::Busy;
+        return ActivationResult::Unavailable;
     }
 
     bool StartLauncherHost()
@@ -147,7 +158,8 @@ namespace
         for (int attempt = 0; attempt < 30; ++attempt)
         {
             Sleep(100);
-            if (SendWarmActivation(folder, files, cursor)) return;
+            const auto result = SendWarmActivation(folder, files, cursor);
+            if (result == ActivationResult::Accepted || result == ActivationResult::Busy) return;
         }
     }
 }
@@ -182,7 +194,9 @@ HRESULT ExplorerCommand::Invoke(IShellItemArray* items, IBindCtx*) noexcept
     {
         std::wstring folder; std::vector<std::wstring> files;
         const auto result = ResolveActivation(items, site_.Get(), folder, files); if (FAILED(result)) return result;
-        const auto cursor = InvocationOrigin(); if (!SendWarmActivation(folder, files, cursor)) ActivateCold(folder, files, cursor); return S_OK;
+        const auto cursor = InvocationOrigin();
+        if (SendWarmActivation(folder, files, cursor) == ActivationResult::Unavailable) ActivateCold(folder, files, cursor);
+        return S_OK;
     }
     catch (const std::bad_alloc&) { return E_OUTOFMEMORY; } catch (...) { return E_FAIL; }
 }
