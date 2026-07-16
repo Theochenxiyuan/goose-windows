@@ -51,6 +51,15 @@ impl ProviderEntry {
     }
 
     pub fn inventory_configured(&self) -> bool {
+        self.inventory_configured_with_config(crate::config::Config::global())
+    }
+
+    fn inventory_configured_with_config(&self, config: &crate::config::Config) -> bool {
+        if let Some(entry) = crate::config::get_provider_entry(config, &self.metadata.name) {
+            if !entry.enabled || !entry.configured {
+                return false;
+            }
+        }
         (self.inventory_configured)()
     }
 
@@ -299,9 +308,21 @@ impl ProviderRegistry {
             model_selection_hint: None,
             fast_model: config.fast_model.clone(),
         };
+        let inventory_provider_id = custom_metadata.name.clone();
+        let custom_without_auth = provider_type == ProviderType::Custom && !config.requires_auth;
         let inventory_config_keys = custom_metadata.config_keys.clone();
         let default_inventory_configured = Arc::new(move || {
+            if custom_without_auth
+                && crate::config::get_provider_entry(
+                    crate::config::Config::global(),
+                    &inventory_provider_id,
+                )
+                .is_none()
+            {
+                return true;
+            }
             super::inventory::default_inventory_configured(
+                &inventory_provider_id,
                 &inventory_config_keys,
                 crate::config::Config::global(),
             )
@@ -411,7 +432,34 @@ mod tests {
         );
 
         let entry = registry.entries.get("custom_hf").unwrap();
+        let config_file = tempfile::NamedTempFile::new().unwrap();
+        let secrets_file = tempfile::NamedTempFile::new().unwrap();
+        let config =
+            crate::config::Config::new_with_file_secrets(config_file.path(), secrets_file.path())
+                .unwrap();
 
-        assert!(!entry.inventory_configured());
+        assert!(!entry.inventory_configured_with_config(&config));
+    }
+
+    #[test]
+    fn explicitly_disabled_provider_overrides_discovery() {
+        let mut registry = ProviderRegistry::new(None);
+        registry.register_with_name_and_inventory_configured::<OpenAiProviderDef, _, _, _>(
+            &test_config(),
+            ProviderType::Declarative,
+            false,
+            |_| unreachable!("constructor is not used by this test"),
+            || Ok(InventoryIdentityInput::new("custom_hf", "huggingface")),
+            || true,
+        );
+        let config_file = tempfile::NamedTempFile::new().unwrap();
+        let secrets_file = tempfile::NamedTempFile::new().unwrap();
+        let config =
+            crate::config::Config::new_with_file_secrets(config_file.path(), secrets_file.path())
+                .unwrap();
+        crate::config::set_provider_configured(&config, "custom_hf", false).unwrap();
+
+        let entry = registry.entries.get("custom_hf").unwrap();
+        assert!(!entry.inventory_configured_with_config(&config));
     }
 }

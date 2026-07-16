@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AppInstaller
+  xmlns="http://schemas.microsoft.com/appx/appinstaller/2017/2"
+  xmlns:s4="http://schemas.microsoft.com/appx/appinstaller/2018"
+  Uri="__GOOSE_APPINSTALLER_URI__"
+  Version="__GOOSE_PACKAGE_VERSION__">
+  <MainPackage
+    Name="__GOOSE_PACKAGE_IDENTITY__"
+    Publisher="CN=REPLACE_WITH_SIGNING_IDENTITY"
+    Version="__GOOSE_PACKAGE_VERSION__"
+    ProcessorArchitecture="x64"
+    Uri="__GOOSE_PACKAGE_URI__" />
+  <UpdateSettings>
+    <OnLaunch HoursBetweenUpdateChecks="4" />
+    <s4:AutomaticBackgroundTask />
+  </UpdateSettings>
+</AppInstaller>

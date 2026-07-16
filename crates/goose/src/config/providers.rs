@@ -62,6 +62,21 @@ pub fn set_provider_entry(
     })
 }
 
+pub fn set_provider_configured(
+    config: &Config,
+    name: &str,
+    configured: bool,
+) -> Result<(), ConfigError> {
+    let mut entry = get_provider_entry(config, name).unwrap_or(ProviderEntry {
+        enabled: false,
+        model: String::new(),
+        configured: false,
+    });
+    entry.enabled = configured;
+    entry.configured = configured;
+    set_provider_entry(config, name, &entry)
+}
+
 pub fn get_active_provider(config: &Config) -> Option<String> {
     if let Ok(val) = env::var("GOOSE_PROVIDER") {
         return Some(val);
@@ -196,5 +211,23 @@ mod tests {
         assert!(anthropic.configured);
 
         assert_eq!(get_active_provider(&config), Some("anthropic".to_string()));
+    }
+
+    #[test]
+    fn set_provider_configured_preserves_selected_model() {
+        let config = new_test_config();
+        set_active_provider(&config, "openai", "gpt-4o").unwrap();
+
+        set_provider_configured(&config, "openai", false).unwrap();
+        let disabled = get_provider_entry(&config, "openai").unwrap();
+        assert!(!disabled.enabled);
+        assert!(!disabled.configured);
+        assert_eq!(disabled.model, "gpt-4o");
+
+        set_provider_configured(&config, "openai", true).unwrap();
+        let enabled = get_provider_entry(&config, "openai").unwrap();
+        assert!(enabled.enabled);
+        assert!(enabled.configured);
+        assert_eq!(enabled.model, "gpt-4o");
     }
 }

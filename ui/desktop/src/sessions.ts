@@ -6,6 +6,7 @@ import type { FixedExtensionEntry } from './components/ConfigContext';
 import { AppEvents } from './constants/events';
 import { acpChatSessionController } from './acp/chatSessionController';
 import { getConfiguredGooseExtensions, gooseExtensionName } from './acp/extensions';
+import type { LauncherSessionSelection } from './launcherActivation/protocol';
 
 export function getSessionDisplayName(session: Session): string {
   if (session.user_set_name) {
@@ -47,6 +48,7 @@ interface CreateSessionOptions {
   recipeId?: string;
   extensionConfigs?: ExtensionConfig[];
   allExtensions?: FixedExtensionEntry[];
+  launcherSessionSelection?: LauncherSessionSelection;
 }
 
 function selectedExtensionConfigs(options?: CreateSessionOptions): ExtensionConfig[] {
@@ -75,10 +77,15 @@ async function createAcpSession(
           .filter((entry) => selectedNames.has(gooseExtensionName(entry.extension)))
           .map((entry) => entry.extension)
       : [];
-  return acpChatSessionController.createSession(workingDir, gooseExtensions, {
-    recipeId: options?.recipeId,
-    recipeDeeplink: options?.recipeDeeplink,
-  });
+  return acpChatSessionController.createSession(
+    workingDir,
+    gooseExtensions,
+    {
+      recipeId: options?.recipeId,
+      recipeDeeplink: options?.recipeDeeplink,
+    },
+    options?.launcherSessionSelection
+  );
 }
 
 export async function createSession(

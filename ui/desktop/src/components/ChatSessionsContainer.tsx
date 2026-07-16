@@ -12,6 +12,7 @@ interface ChatSessionsContainerProps {
     sessionId: string;
     initialMessage?: UserInput;
     noAutoSubmit?: boolean;
+    launcherRequestId?: string;
   }>;
 }
 
@@ -70,6 +71,7 @@ export default function ChatSessionsContainer({
               sessionId={session.sessionId}
               initialMessage={session.initialMessage}
               noAutoSubmit={session.noAutoSubmit}
+              launcherRequestId={session.launcherRequestId}
               suppressEmptyState={false}
               isActiveSession={isVisible}
             />

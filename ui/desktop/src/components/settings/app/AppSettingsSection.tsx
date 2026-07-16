@@ -189,6 +189,7 @@ export default function AppSettingsSection({ scrollToSection }: AppSettingsSecti
   const [showPricing, setShowPricing] = useState(true);
   const [language, setLanguage] = useState<LanguageSetting>('system');
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const isWindows = window.electron.platform === 'win32';
   const updateSectionRef = useRef<HTMLDivElement>(null);
   const shouldShowUpdates = !window.appConfig.get('GOOSE_VERSION');
 
@@ -393,21 +394,25 @@ export default function AppSettingsSection({ scrollToSection }: AppSettingsSecti
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-text-primary text-xs">{intl.formatMessage(i18n.menuBarIcon)}</h3>
-              <p className="text-xs text-text-secondary max-w-md mt-[2px]">
-                {intl.formatMessage(i18n.menuBarIconDesc)}
-              </p>
+          {!isWindows && (
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-text-primary text-xs">
+                  {intl.formatMessage(i18n.menuBarIcon)}
+                </h3>
+                <p className="text-xs text-text-secondary max-w-md mt-[2px]">
+                  {intl.formatMessage(i18n.menuBarIconDesc)}
+                </p>
+              </div>
+              <div className="flex items-center">
+                <Switch
+                  checked={menuBarIconEnabled}
+                  onCheckedChange={handleMenuBarIconToggle}
+                  variant="mono"
+                />
+              </div>
             </div>
-            <div className="flex items-center">
-              <Switch
-                checked={menuBarIconEnabled}
-                onCheckedChange={handleMenuBarIconToggle}
-                variant="mono"
-              />
-            </div>
-          </div>
+          )}
 
           {isMacOS && (
             <div className="flex items-center justify-between">

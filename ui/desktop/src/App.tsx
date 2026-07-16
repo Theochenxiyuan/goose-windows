@@ -23,11 +23,21 @@ import { acpListSessions, acpDeleteSession } from './acp/sessions';
 import { ChatType } from './types/chat';
 import Hub from './components/Hub';
 import { UserInput } from './types/message';
+import type { LauncherSessionSelection } from './launcherActivation/protocol';
 
 interface PairRouteState {
   resumeSessionId?: string;
   initialMessage?: UserInput;
   noAutoSubmit?: boolean;
+  launcherSessionSelection?: LauncherSessionSelection;
+  launcherRequestId?: string;
+}
+
+interface ActiveSession {
+  sessionId: string;
+  initialMessage?: UserInput;
+  noAutoSubmit?: boolean;
+  launcherRequestId?: string;
 }
 import SettingsView, { SettingsViewOptions } from './components/settings/SettingsView';
 import SessionsView from './components/sessions/SessionsView';
@@ -84,14 +94,8 @@ export function resolveSessionInitialMessage(
 const PairRouteWrapper = ({
   activeSessions,
 }: {
-  activeSessions: Array<{
-    sessionId: string;
-    initialMessage?: UserInput;
-    noAutoSubmit?: boolean;
-  }>;
-  setActiveSessions: (
-    sessions: Array<{ sessionId: string; initialMessage?: UserInput; noAutoSubmit?: boolean }>
-  ) => void;
+  activeSessions: ActiveSession[];
+  setActiveSessions: (sessions: ActiveSession[]) => void;
 }) => {
   const { extensionsList } = useConfig();
   const location = useLocation();
@@ -106,6 +110,8 @@ const PairRouteWrapper = ({
   const recipeIdFromConfig = window.appConfig?.get('recipeId') as string | undefined;
   const initialMessage = routeState.initialMessage;
   const noAutoSubmit = routeState.noAutoSubmit;
+  const launcherSessionSelection = routeState.launcherSessionSelection;
+  const launcherRequestId = routeState.launcherRequestId;
 
   // Create session if we have an initialMessage, recipeDeeplink, or recipeId but no sessionId
   useEffect(() => {
@@ -122,6 +128,7 @@ const PairRouteWrapper = ({
             recipeDeeplink: recipeDeeplinkFromConfig,
             recipeId: recipeIdFromConfig,
             allExtensions: extensionsList,
+            launcherSessionSelection,
           });
           const sessionInitialMessage = resolveSessionInitialMessage(newSession, initialMessage);
 
@@ -131,6 +138,7 @@ const PairRouteWrapper = ({
                 sessionId: newSession.id,
                 initialMessage: sessionInitialMessage,
                 noAutoSubmit,
+                launcherRequestId,
               },
             })
           );
@@ -140,6 +148,13 @@ const PairRouteWrapper = ({
             return prev;
           });
         } catch (error) {
+          if (launcherRequestId) {
+            window.electron.completeLauncherActivation({
+              requestId: launcherRequestId,
+              status: 'rejected',
+              code: 'session_creation_failed',
+            });
+          }
           if (isRecipeParamsCancelled(error)) {
             navigate('/');
             return;
@@ -163,6 +178,8 @@ const PairRouteWrapper = ({
     resumeSessionId,
     setSearchParams,
     extensionsList,
+    launcherSessionSelection,
+    launcherRequestId,
   ]);
 
   // Add resumed session to active sessions if not already there
@@ -322,18 +339,12 @@ export function AppInner() {
 
   const MAX_ACTIVE_SESSIONS = 10;
 
-  const [activeSessions, setActiveSessions] = useState<
-    Array<{ sessionId: string; initialMessage?: UserInput; noAutoSubmit?: boolean }>
-  >([]);
+  const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
 
   useEffect(() => {
     const handleAddActiveSession = (event: Event) => {
-      const { sessionId, initialMessage, noAutoSubmit } = (
-        event as CustomEvent<{
-          sessionId: string;
-          initialMessage?: UserInput;
-          noAutoSubmit?: boolean;
-        }>
+      const { sessionId, initialMessage, noAutoSubmit, launcherRequestId } = (
+        event as CustomEvent<ActiveSession>
       ).detail;
 
       setActiveSessions((prev) => {
@@ -346,7 +357,7 @@ export function AppInner() {
         }
 
         // New session - add to end with LRU eviction if needed
-        const newSession = { sessionId, initialMessage, noAutoSubmit };
+        const newSession = { sessionId, initialMessage, noAutoSubmit, launcherRequestId };
         const updated = [...prev, newSession];
         if (updated.length > MAX_ACTIVE_SESSIONS) {
           return updated.slice(updated.length - MAX_ACTIVE_SESSIONS);
@@ -361,7 +372,7 @@ export function AppInner() {
       setActiveSessions((prev) => {
         return prev.map((session) => {
           if (session.sessionId === sessionId) {
-            return { ...session, initialMessage: undefined };
+            return { ...session, initialMessage: undefined, launcherRequestId: undefined };
           }
           return session;
         });
@@ -387,15 +398,6 @@ export function AppInner() {
   }, []);
 
   const { addExtension } = useConfig();
-
-  useEffect(() => {
-    try {
-      window.electron.reactReady();
-    } catch (error) {
-      console.error('Error sending reactReady:', error);
-      setFatalError(`React ready notification failed: ${errorMessage(error, 'Unknown error')}`);
-    }
-  }, []);
 
   useEffect(() => {
     const handleSystemResume = () => reconnectAcpAfterSystemResume();
@@ -576,7 +578,14 @@ export function AppInner() {
   useEffect(() => {
     const handleSetInitialMessage = async (_event: IpcRendererEvent, ...args: unknown[]) => {
       const initialMessage = args[0] as string;
-      const options = (args[1] as { noAutoSubmit?: boolean } | undefined) || {};
+      const options =
+        (args[1] as
+          | {
+              noAutoSubmit?: boolean;
+              launcherSessionSelection?: LauncherSessionSelection;
+              launcherRequestId?: string;
+            }
+          | undefined) || {};
 
       if (initialMessage && !isProcessingRef.current) {
         isProcessingRef.current = true;
@@ -584,11 +593,19 @@ export function AppInner() {
           state: {
             initialMessage: { msg: initialMessage, images: [] },
             noAutoSubmit: options.noAutoSubmit,
+            launcherSessionSelection: options.launcherSessionSelection,
+            launcherRequestId: options.launcherRequestId,
           },
         });
         setTimeout(() => {
           isProcessingRef.current = false;
         }, 1000);
+      } else if (initialMessage && options.launcherRequestId) {
+        window.electron.completeLauncherActivation({
+          requestId: options.launcherRequestId,
+          status: 'rejected',
+          code: 'renderer_busy',
+        });
       }
     };
     window.electron.on('set-initial-message', handleSetInitialMessage);
@@ -596,6 +613,17 @@ export function AppInner() {
       window.electron.off('set-initial-message', handleSetInitialMessage);
     };
   }, [navigate]);
+
+  // Register the activation listener before telling main that React is ready;
+  // main can synchronously deliver a pending Launcher task in response.
+  useEffect(() => {
+    try {
+      window.electron.reactReady();
+    } catch (error) {
+      console.error('Error sending reactReady:', error);
+      setFatalError(`React ready notification failed: ${errorMessage(error, 'Unknown error')}`);
+    }
+  }, []);
 
   // Register platform event handlers for app lifecycle management
   useEffect(() => {

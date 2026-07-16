@@ -576,6 +576,8 @@ impl GooseAcpAgent {
             .internal_err_ctx("Failed to refresh custom providers")?;
 
         let provider_id = config.name;
+        crate::config::set_provider_configured(Config::global(), &provider_id, true)
+            .internal_err_ctx("Failed to enable custom provider")?;
         let provider_ids = [provider_id.clone()];
         let status = Self::provider_config_status(provider_id.clone()).await;
         let refresh = self.start_provider_inventory_refresh(&provider_ids).await?;
@@ -644,6 +646,8 @@ impl GooseAcpAgent {
             .await
             .internal_err_ctx("Failed to refresh custom providers")?;
 
+        crate::config::set_provider_configured(Config::global(), &req.provider_id, true)
+            .internal_err_ctx("Failed to enable custom provider")?;
         let provider_ids = [req.provider_id.clone()];
         let status = Self::provider_config_status(req.provider_id.clone()).await;
         let refresh = self.start_provider_inventory_refresh(&provider_ids).await?;
@@ -910,6 +914,8 @@ impl GooseAcpAgent {
         config
             .set_secret_values(&secret_updates)
             .internal_err_ctx("Failed to save provider secret fields")?;
+        crate::config::set_provider_configured(config, &req.provider_id, true)
+            .internal_err_ctx("Failed to enable provider")?;
 
         let provider_ids = [req.provider_id.clone()];
         let status = Self::provider_config_status(req.provider_id.clone()).await;
@@ -944,6 +950,8 @@ impl GooseAcpAgent {
         crate::providers::cleanup_provider(&req.provider_id)
             .await
             .internal_err_ctx("Failed to clean up provider state")?;
+        crate::config::set_provider_configured(config, &req.provider_id, false)
+            .internal_err_ctx("Failed to disable provider")?;
 
         let provider_ids = [req.provider_id.clone()];
         let status = Self::provider_config_status(req.provider_id.clone()).await;
@@ -982,6 +990,8 @@ impl GooseAcpAgent {
                 .internal_err_ctx("Failed to authenticate provider")?;
         }
         Config::global().invalidate_secrets_cache();
+        crate::config::set_provider_configured(Config::global(), &req.provider_id, true)
+            .internal_err_ctx("Failed to enable provider")?;
 
         let provider_ids = [req.provider_id.clone()];
         let status = Self::provider_config_status(req.provider_id.clone()).await;

@@ -59,6 +59,7 @@ interface BaseChatProps {
   isActiveSession: boolean;
   initialMessage?: UserInput;
   noAutoSubmit?: boolean;
+  launcherRequestId?: string;
 }
 
 export default function BaseChat({
@@ -69,6 +70,7 @@ export default function BaseChat({
   sessionId,
   initialMessage,
   noAutoSubmit,
+  launcherRequestId,
   isActiveSession,
 }: BaseChatProps) {
   const intl = useIntl();
@@ -88,6 +90,20 @@ export default function BaseChat({
   const contentClassName = cn('pr-1 pb-10 pt-12', (isMobile || isNavCollapsed) && 'pt-16');
   const { droppedFiles, setDroppedFiles, handleDrop, handleDragOver } = useFileDrop();
   const onStreamFinish = useCallback(() => {}, []);
+  const launcherActivationReportedRef = useRef(false);
+
+  useEffect(() => {
+    launcherActivationReportedRef.current = false;
+  }, [launcherRequestId]);
+
+  const reportLauncherActivation = useCallback(
+    (status: 'accepted' | 'rejected', code?: string) => {
+      if (!launcherRequestId || launcherActivationReportedRef.current) return;
+      launcherActivationReportedRef.current = true;
+      window.electron.completeLauncherActivation({ requestId: launcherRequestId, status, code });
+    },
+    [launcherRequestId]
+  );
 
   useEffect(() => subscribeToAcpRecovery(setAcpRecovering), []);
 
@@ -153,6 +169,8 @@ export default function BaseChat({
     initialMessage: resolvedInitialMessage,
     canAutoSubmit,
     handleSubmit,
+    onSubmitStarted: () => reportLauncherActivation('accepted'),
+    onSubmitRejected: () => reportLauncherActivation('rejected', 'submission_not_started'),
   });
 
   useEffect(() => {

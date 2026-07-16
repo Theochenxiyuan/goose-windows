@@ -55,10 +55,15 @@ import type { GooseApp } from './types/apps';
 import installExtension, { REACT_DEVELOPER_TOOLS } from 'electron-devtools-installer';
 import { BLOCKED_PROTOCOLS, WEB_PROTOCOLS } from './utils/urlSecurity';
 import { buildCSP } from './utils/csp';
+import { DesktopActivationRouter } from './launcherActivation/router';
+import { DesktopActivationServer } from './launcherActivation/server';
+import {
+  DesktopActivationProtocolError,
+  type LauncherSessionSelection,
+} from './launcherActivation/protocol';
 
 function shouldSetupUpdater(): boolean {
-  // Setup updater if either the flag is enabled OR dev updates are enabled
-  return UPDATES_ENABLED || process.env.ENABLE_DEV_UPDATES === 'true';
+  return UPDATES_ENABLED;
 }
 
 // =======================================================================
@@ -973,10 +978,24 @@ const windowPowerSaveBlockers = new Map<number, number>(); // windowId -> blocke
 // Track pending initial messages per window
 const pendingInitialMessages = new Map<number, string>(); // windowId -> initialMessage
 const pendingInitialMessageNoAutoSubmit = new Set<number>(); // windowIds whose initialMessage should NOT auto-submit
+const pendingLauncherSessionSelections = new Map<number, LauncherSessionSelection>();
+interface LauncherActivationWaiter {
+  requestId: string;
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timeout?: ReturnType<typeof setTimeout>;
+}
+const pendingLauncherActivations = new Map<number, LauncherActivationWaiter>();
+const LAUNCHER_RENDERER_ACK_TIMEOUT_MS = 30_000;
+let desktopActivationServer: DesktopActivationServer | undefined;
+let desktopActivationHandled = false;
+let desktopActivationFallbackTimer: ReturnType<typeof setTimeout> | undefined;
 
 interface CreateChatOptions {
   initialMessage?: string;
   initialMessageNoAutoSubmit?: boolean;
+  launcherSessionSelection?: LauncherSessionSelection;
   dir?: string;
   resumeSessionId?: string;
   viewType?: string;
@@ -984,6 +1003,25 @@ interface CreateChatOptions {
   recipeId?: string;
   scheduledJobId?: string;
   recipeParameters?: Record<string, string>;
+  launcherActivation?: LauncherActivationWaiter;
+}
+
+function createLauncherActivationWaiter(requestId: string): LauncherActivationWaiter {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { requestId, promise, resolve, reject };
+}
+
+function takeLauncherActivation(windowId: number): LauncherActivationWaiter | undefined {
+  const activation = pendingLauncherActivations.get(windowId);
+  if (!activation) return undefined;
+  pendingLauncherActivations.delete(windowId);
+  if (activation.timeout) clearTimeout(activation.timeout);
+  return activation;
 }
 
 const createChat = async (
@@ -993,6 +1031,7 @@ const createChat = async (
   const {
     initialMessage,
     initialMessageNoAutoSubmit,
+    launcherSessionSelection,
     dir,
     resumeSessionId,
     viewType,
@@ -1000,6 +1039,7 @@ const createChat = async (
     recipeId,
     scheduledJobId,
     recipeParameters,
+    launcherActivation,
   } = options;
   const settings = getSettings();
 
@@ -1385,6 +1425,19 @@ const createChat = async (
   });
 
   const windowId = mainWindow.id;
+  if (launcherActivation) {
+    pendingLauncherActivations.set(windowId, launcherActivation);
+    launcherActivation.timeout = setTimeout(() => {
+      const pending = takeLauncherActivation(windowId);
+      pending?.reject(
+        new DesktopActivationProtocolError(
+          'renderer_timeout',
+          'Goose timed out while handing the task to the session.'
+        )
+      );
+      if (!mainWindow.isDestroyed()) mainWindow.close();
+    }, LAUNCHER_RENDERER_ACK_TIMEOUT_MS);
+  }
   const url = getAppUrl();
 
   let appPath = '/';
@@ -1432,6 +1485,9 @@ const createChat = async (
   // If we have an initial message, store it to send after React is ready
   if (initialMessage) {
     pendingInitialMessages.set(mainWindow.id, initialMessage);
+    if (launcherSessionSelection) {
+      pendingLauncherSessionSelections.set(mainWindow.id, launcherSessionSelection);
+    }
     if (initialMessageNoAutoSubmit) {
       pendingInitialMessageNoAutoSubmit.add(mainWindow.id);
     }
@@ -1482,8 +1538,15 @@ const createChat = async (
     windowMap.delete(windowId);
 
     pendingInitialMessages.delete(windowId);
+    pendingLauncherSessionSelections.delete(windowId);
     pendingDeepLinks.delete(windowId);
     reactReadyWindows.delete(windowId);
+    takeLauncherActivation(windowId)?.reject(
+      new DesktopActivationProtocolError(
+        'window_closed',
+        'The Goose window closed before it accepted the task.'
+      )
+    );
 
     if (windowPowerSaveBlockers.has(windowId)) {
       const blockerId = windowPowerSaveBlockers.get(windowId)!;
@@ -1852,10 +1915,17 @@ ipcMain.on('react-ready', (event) => {
   if (windowId && pendingInitialMessages.has(windowId)) {
     const initialMessage = pendingInitialMessages.get(windowId)!;
     const noAutoSubmit = pendingInitialMessageNoAutoSubmit.has(windowId);
-    log.info('Sending pending initial message to window:', initialMessage);
-    window.webContents.send('set-initial-message', initialMessage, { noAutoSubmit });
+    const launcherSessionSelection = pendingLauncherSessionSelections.get(windowId);
+    const launcherRequestId = pendingLauncherActivations.get(windowId)?.requestId;
+    log.info('Sending pending initial message to window');
+    window.webContents.send('set-initial-message', initialMessage, {
+      noAutoSubmit,
+      launcherSessionSelection,
+      launcherRequestId,
+    });
     pendingInitialMessages.delete(windowId);
     pendingInitialMessageNoAutoSubmit.delete(windowId);
+    pendingLauncherSessionSelections.delete(windowId);
   }
 
   if (windowId && pendingDeepLinks.has(windowId) && window) {
@@ -1873,6 +1943,33 @@ ipcMain.on('react-ready', (event) => {
       log.error('Error processing pending deep link:', error);
     }
   }
+});
+
+ipcMain.on('launcher-activation-result', (event, result: unknown) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window || !result || typeof result !== 'object') return;
+
+  const value = result as Record<string, unknown>;
+  const pending = pendingLauncherActivations.get(window.id);
+  if (!pending || value.requestId !== pending.requestId) return;
+
+  const activation = takeLauncherActivation(window.id);
+  if (!activation) return;
+  if (value.status === 'accepted') {
+    activation.resolve();
+    return;
+  }
+
+  const code = typeof value.code === 'string' ? value.code : 'renderer_rejected';
+  activation.reject(
+    new DesktopActivationProtocolError(
+      code,
+      code === 'session_creation_failed'
+        ? 'Goose could not create the requested session.'
+        : 'Goose could not submit the task to the requested session.'
+    )
+  );
+  if (!window.isDestroyed()) window.close();
 });
 
 ipcMain.handle('open-external', async (_event, url: string) => {
@@ -1980,6 +2077,8 @@ ipcMain.handle('get-acp-url', async (event) => {
 
 // Handle menu bar icon visibility
 ipcMain.handle('set-menu-bar-icon', async (_event, show: boolean) => {
+  if (process.platform === 'win32') return false;
+
   updateSettings((s) => {
     s.showMenuBarIcon = show;
   });
@@ -1993,6 +2092,8 @@ ipcMain.handle('set-menu-bar-icon', async (_event, show: boolean) => {
 });
 
 ipcMain.handle('get-menu-bar-icon-state', () => {
+  if (process.platform === 'win32') return false;
+
   try {
     const settings = getSettings();
     return settings.showMenuBarIcon ?? true;
@@ -2422,7 +2523,7 @@ async function appMain() {
   // Ensure Windows shims are available before any MCP processes are spawned
   await ensureWinShims();
 
-  registerUpdateIpcHandlers();
+  if (UPDATES_ENABLED) registerUpdateIpcHandlers();
 
   // Handle microphone permission requests
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
@@ -2465,7 +2566,44 @@ async function appMain() {
     callback({ cancel: false, requestHeaders: details.requestHeaders });
   });
 
-  if (settings.showMenuBarIcon) {
+  if (process.platform === 'win32') {
+    const activationServer = new DesktopActivationServer({
+      router: new DesktopActivationRouter(async (options) => {
+        const { launcherRequestId, ...chatOptions } = options;
+        const activation = launcherRequestId
+          ? createLauncherActivationWaiter(launcherRequestId)
+          : undefined;
+        const window = await createChat(app, {
+          ...chatOptions,
+          launcherActivation: activation,
+        });
+        return window
+          ? {
+              window,
+              activationAccepted: activation?.promise,
+            }
+          : undefined;
+      }),
+      onHandled: (request) => {
+        if (request.action !== 'run' && request.action !== 'open') return;
+        desktopActivationHandled = true;
+        if (desktopActivationFallbackTimer) {
+          clearTimeout(desktopActivationFallbackTimer);
+          desktopActivationFallbackTimer = undefined;
+        }
+      },
+      onError: (code) => log.error(`[LauncherActivation] Request rejected: ${code}`),
+    });
+    try {
+      await activationServer.start();
+      desktopActivationServer = activationServer;
+    } catch (error) {
+      const code = error instanceof Error ? error.name : 'UnknownError';
+      log.error(`[LauncherActivation] Server unavailable: ${code}`);
+    }
+  }
+
+  if (process.platform !== 'win32' && settings.showMenuBarIcon) {
     createTray();
   }
 
@@ -2475,8 +2613,17 @@ async function appMain() {
 
   const { dirPath } = parseArgs();
 
-  if (!openUrlHandledLaunch) {
+  const launchedForLauncherActivation =
+    process.platform === 'win32' && process.argv.includes('--launcher-activation');
+  if (!openUrlHandledLaunch && !launchedForLauncherActivation) {
     await createNewWindow(app, dirPath);
+  } else if (launchedForLauncherActivation && !desktopActivationHandled) {
+    desktopActivationFallbackTimer = setTimeout(() => {
+      desktopActivationFallbackTimer = undefined;
+      if (!desktopActivationHandled && BrowserWindow.getAllWindows().length === 0) {
+        void createNewWindow(app, dirPath);
+      }
+    }, 15_000);
   } else {
     log.info('[Main] Skipping window creation in appMain - open-url already handled launch');
   }
@@ -3117,6 +3264,15 @@ async function getAllowList(): Promise<string[]> {
 }
 
 app.on('will-quit', async () => {
+  if (desktopActivationFallbackTimer) {
+    clearTimeout(desktopActivationFallbackTimer);
+    desktopActivationFallbackTimer = undefined;
+  }
+  if (desktopActivationServer) {
+    await desktopActivationServer.stop();
+    desktopActivationServer = undefined;
+  }
+
   const gooseServeLeaseCount = gooseServeLeases.activeLeaseCount();
   if (gooseServeLeaseCount > 0) {
     log.info(`App quitting, cleaning up ${gooseServeLeaseCount} backend lease(s)`);

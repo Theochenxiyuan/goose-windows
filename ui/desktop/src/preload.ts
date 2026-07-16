@@ -86,6 +86,12 @@ interface UpdaterEvent {
   data?: unknown;
 }
 
+interface LauncherActivationResult {
+  requestId: string;
+  status: 'accepted' | 'rejected';
+  code?: string;
+}
+
 export interface CreateChatWindowOptions {
   query?: string;
   dir?: string;
@@ -100,6 +106,7 @@ type ElectronAPI = {
   platform: string;
   arch: string;
   reactReady: () => void;
+  completeLauncherActivation: (result: LauncherActivationResult) => void;
   getConfig: () => Record<string, unknown>;
   hideWindow: () => void;
   directoryChooser: () => Promise<Electron.OpenDialogReturnValue>;
@@ -189,6 +196,8 @@ const electronAPI: ElectronAPI = {
   platform: process.platform,
   arch: process.arch,
   reactReady: () => ipcRenderer.send('react-ready'),
+  completeLauncherActivation: (result: LauncherActivationResult) =>
+    ipcRenderer.send('launcher-activation-result', result),
   getConfig: () => {
     if (!config || Object.keys(config).length === 0) {
       console.warn(

@@ -141,6 +141,7 @@ jobs:
             goose-*.tar.gz
             goose-*.zip
             Goose*.zip
+            *.msix
             *.deb
             *.rpm
             *.flatpak
@@ -156,6 +157,7 @@ jobs:
             goose-*.tar.gz
             goose-*.zip
             Goose*.zip
+            *.msix
             *.deb
             *.rpm
             *.flatpak
@@ -176,10 +178,23 @@ jobs:
             goose-*.tar.gz
             goose-*.zip
             Goose*.zip
+            *.msix
             *.deb
             *.rpm
             *.flatpak
             download_cli.sh
+          allowUpdates: true
+          omitBody: true
+          omitPrereleaseDuringUpdate: true
+
+      # Publish feed manifests only after every package URI they reference exists.
+      - name: Publish stable App Installer feeds
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd  # v1.21.0
+        with:
+          tag: stable
+          name: Stable
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifacts: '*.appinstaller'
           allowUpdates: true
           omitBody: true
           omitPrereleaseDuringUpdate: true
