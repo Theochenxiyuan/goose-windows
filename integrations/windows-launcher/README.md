@@ -27,16 +27,26 @@ dotnet run --project .\src\GooseLauncher.App -- --folder "$PWD"
 
 Launcher resolves Goose Desktop and CLI only from the unified installation layout. Set `GOOSE_WINDOWS_ROOT` only when running Launcher from a development build outside the package.
 
-Build Desktop first, then create or install the unified package:
+Use the unified Windows build entry point from this directory:
+
+```powershell
+.\scripts\build-windows.ps1 -Mode Quick
+.\scripts\build-windows.ps1 -Mode Quick -Install
+.\scripts\build-windows.ps1 -Mode Full -Sign
+.\scripts\build-windows.ps1 -Mode Full -Install -RestartExplorer
+```
+
+`Quick` checks Rust and Desktop inputs and reuses the existing CLI or packaged Desktop when they are current. It still rebuilds Launcher and the MSIX so Launcher-only changes are included. `Full` always runs the complete Cargo and Electron packaging stages, while retaining their normal incremental caches. Use `-PlanOnly` with either mode to inspect what will run and validate required tooling without producing an artifact.
+
+The entry point configures the Visual Studio x64 environment, Ninja, UTF-8 C++ compilation, LLVM `libclang`, CMake, and Windows SDK tools before a complete CLI build. Missing dependencies fail early with an actionable installation hint. The lower-level commands remain available when debugging an individual stage:
 
 ```powershell
 cd ..\..\ui\desktop
 pnpm run package
 cd ..\..\integrations\windows-launcher
 .\scripts\build-msix.ps1
-.\scripts\build-msix.ps1 -Install -RestartExplorer
 ```
 
-`pnpm run package` prepares the Windows runtime before Electron packaging. The MSIX build refuses to continue unless the packaged runtime contains Goose CLI, `uv`, `uvx`, and the portable Node `npx` bootstrapper.
+Desktop packaging prepares the Windows runtime before Electron packaging. The MSIX build refuses to continue unless the packaged runtime contains Goose CLI, `uv`, `uvx`, and the portable Node `npx` bootstrapper.
 
 See [docs/architecture.md](docs/architecture.md) for protocol and ownership boundaries.
