@@ -103,6 +103,29 @@ public sealed class CoreTests
     }
 
     [TestMethod]
+    public void MatchesDesktopActivationGoldenFixture()
+    {
+        var fixturePath = Path.Combine(AppContext.BaseDirectory, "protocol", "fixtures", "desktop-run-v2.json");
+        using var expected = JsonDocument.Parse(File.ReadAllText(fixturePath));
+        var root = expected.RootElement;
+        var selection = root.GetProperty("sessionSelection");
+        var frame = DesktopActivationProtocol.EncodeRequest(
+            root.GetProperty("requestId").GetString()!,
+            root.GetProperty("action").GetString()!,
+            root.GetProperty("authToken").GetString()!,
+            root.GetProperty("cwd").GetString(),
+            root.GetProperty("prompt").GetString(),
+            root.GetProperty("files").EnumerateArray().Select(value => value.GetString()!).ToArray(),
+            root.GetProperty("bringToFront").GetBoolean(),
+            new LauncherSessionSelection(
+                selection.GetProperty("provider").GetString()!,
+                selection.GetProperty("model").GetString()!,
+                selection.GetProperty("thinkingEffort").GetString()));
+        using var actual = JsonDocument.Parse(frame.AsMemory(4));
+        Equal(JsonSerializer.Serialize(root), JsonSerializer.Serialize(actual.RootElement));
+    }
+
+    [TestMethod]
     public void BuildsPrivateDesktopLaunchArguments()
     {
         using var workspace = TestWorkspace.Create("Desktop workspace");
@@ -167,7 +190,7 @@ public sealed class CoreTests
                             DesktopActivationProtocol.MaxPayloadBytes,
                             64 * 1024,
                             ActivationRequest.MaxFiles,
-                            true));
+                            false));
                 }
                 else
                 {
@@ -190,6 +213,66 @@ public sealed class CoreTests
         await serverTask;
         Equal(prompt, receivedPrompt);
         Equal(selectedFile, receivedFile);
+    }
+
+    [TestMethod]
+    public async Task TimesOutWhenDesktopDoesNotAcknowledgeRun()
+    {
+        using var workspace = TestWorkspace.Create("activation timeout");
+        var endpointPath = System.IO.Path.Combine(workspace.Path, "desktop-activation.json");
+        var pipeName = $"GooseLauncher.Tests.{Guid.NewGuid():N}";
+        var authToken = new string('c', 64);
+        var endpoint = new DesktopActivationEndpoint(DesktopActivationProtocol.Version, Environment.ProcessId, $@"\\.\pipe\{pipeName}", authToken);
+        File.WriteAllText(endpointPath, JsonSerializer.Serialize(endpoint, DesktopActivationProtocol.JsonOptions));
+
+        var serverTask = Task.Run(async () =>
+        {
+            for (var requestIndex = 0; requestIndex < 2; requestIndex++)
+            {
+                await using var server = new NamedPipeServerStream(
+                    pipeName,
+                    PipeDirection.InOut,
+                    1,
+                    PipeTransmissionMode.Byte,
+                    PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                await server.WaitForConnectionAsync();
+                var header = new byte[4];
+                await server.ReadExactlyAsync(header);
+                var payload = new byte[BinaryPrimitives.ReadInt32LittleEndian(header)];
+                await server.ReadExactlyAsync(payload);
+                using var document = JsonDocument.Parse(payload);
+                var requestId = document.RootElement.GetProperty("requestId").GetString()!;
+                if (requestIndex == 1)
+                {
+                    await Task.Delay(250);
+                    continue;
+                }
+                var response = new DesktopActivationResponse(
+                    DesktopActivationProtocol.Version,
+                    requestId,
+                    "accepted",
+                    Capabilities: new DesktopActivationCapabilities(
+                        ["run"],
+                        DesktopActivationProtocol.MaxPayloadBytes,
+                        64 * 1024,
+                        ActivationRequest.MaxFiles,
+                        false));
+                var responsePayload = JsonSerializer.SerializeToUtf8Bytes(response, DesktopActivationProtocol.JsonOptions);
+                var responseFrame = new byte[responsePayload.Length + 4];
+                BinaryPrimitives.WriteInt32LittleEndian(responseFrame, responsePayload.Length);
+                responsePayload.CopyTo(responseFrame.AsSpan(4));
+                await server.WriteAsync(responseFrame);
+            }
+        });
+
+        var client = new DesktopActivationClient(endpointPath, _ => throw new Exception("Desktop should already be reachable."), TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsExactlyAsync<TimeoutException>(() =>
+            client.RunAsync(
+                new GooseInstallation(workspace.File("goose.exe"), workspace.File("Goose.exe")),
+                workspace.Path,
+                "test",
+                []));
+        await serverTask;
     }
 
     [TestMethod]
@@ -276,7 +359,7 @@ public sealed class CoreTests
             {
               "id": "chatgpt_codex",
               "name": "ChatGPT Codex",
-              "models": [{ "id": "gpt-5.4", "name": "GPT-5.4", "reasoning": true }]
+              "models": [{ "id": "gpt-5.4", "name": "GPT-5.4", "reasoning": true, "thinkingEfforts": ["off", "low", "medium", "high", "max"] }]
             }
           ]
         }
@@ -285,6 +368,7 @@ public sealed class CoreTests
         Equal("chatgpt_codex", catalog.DefaultProvider);
         Equal("gpt-5.4", catalog.Providers[0].Models[0].Id);
         Equal(true, catalog.Providers[0].Models[0].Reasoning);
+        Equal("off,low,medium,high,max", string.Join(',', catalog.Providers[0].Models[0].ThinkingEfforts));
     }
 
     static void Equal<T>(T expected, T actual)

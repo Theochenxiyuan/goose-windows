@@ -16,9 +16,12 @@ internal sealed class SystemTrayIcon : IDisposable
     private const uint NotifyIconVersion4 = 4;
     private const uint TrayCallbackMessage = 0x8001;
     private const uint WindowTimer = 0x0113;
+    private const uint WindowHotKey = 0x0312;
     private const uint WindowNull = 0;
     private const nuint RetryTimerId = 1;
     private const uint MouseRightButtonUp = 0x0205;
+    private const uint MouseLeftButtonUp = 0x0202;
+    private const uint MouseLeftButtonDoubleClick = 0x0203;
     private const uint ContextMenu = 0x007B;
     private const uint MenuString = 0;
     private const uint MenuSeparator = 0x0800;
@@ -32,6 +35,13 @@ internal sealed class SystemTrayIcon : IDisposable
     private const uint MenuSettings = 1003;
     private const uint MenuExit = 1004;
     private const uint MenuOpenCli = 1005;
+    private const uint MenuOpenLauncher = 1006;
+    private const int QuickLauncherHotKeyId = 1;
+    private const uint ModifierAlt = 0x0001;
+    private const uint ModifierControl = 0x0002;
+    private const uint ModifierShift = 0x0004;
+    private const uint ModifierWindows = 0x0008;
+    private const uint ModifierNoRepeat = 0x4000;
 
     private readonly WindowProcedure _windowProcedure;
     private readonly uint _iconId = unchecked((uint)Environment.ProcessId);
@@ -41,9 +51,12 @@ internal sealed class SystemTrayIcon : IDisposable
     private uint _taskbarCreatedMessage;
     private bool _iconAdded;
     private bool _busy;
+    private bool _hotKeyRegistered;
+    private long _lastLauncherInvocation;
     private bool _disposed;
 
     internal event Action? OpenGooseRequested;
+    internal event Action? OpenLauncherRequested;
     internal event Action? OpenCliRequested;
     internal event Action? SettingsRequested;
     internal event Action? ExitRequested;
@@ -91,6 +104,58 @@ internal sealed class SystemTrayIcon : IDisposable
 
         var data = CreateNotificationData();
         ShellNotifyIcon(NotifyModify, ref data);
+    }
+
+    internal bool SetQuickLauncherShortcut(string shortcut)
+    {
+        if (_windowHandle == nint.Zero) return false;
+        if (_hotKeyRegistered)
+        {
+            UnregisterHotKey(_windowHandle, QuickLauncherHotKeyId);
+            _hotKeyRegistered = false;
+        }
+        if (!TryParseShortcut(shortcut, out var modifiers, out var key)) return false;
+        _hotKeyRegistered = RegisterHotKey(
+            _windowHandle,
+            QuickLauncherHotKeyId,
+            modifiers | ModifierNoRepeat,
+            key);
+        return _hotKeyRegistered;
+    }
+
+    internal static bool IsSupportedShortcut(string shortcut) =>
+        TryParseShortcut(shortcut, out _, out _);
+
+    private static bool TryParseShortcut(string shortcut, out uint modifiers, out uint key)
+    {
+        modifiers = 0;
+        key = 0;
+        if (string.IsNullOrWhiteSpace(shortcut)) return false;
+        foreach (var part in shortcut.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            switch (part.ToUpperInvariant())
+            {
+                case "CTRL":
+                case "CONTROL":
+                case "COMMANDORCONTROL": modifiers |= ModifierControl; break;
+                case "ALT": modifiers |= ModifierAlt; break;
+                case "SHIFT": modifiers |= ModifierShift; break;
+                case "WIN":
+                case "WINDOWS":
+                case "SUPER": modifiers |= ModifierWindows; break;
+                default:
+                    if (key != 0) return false;
+                    if (part.Length == 1 && char.IsAsciiLetterOrDigit(part[0]))
+                        key = char.ToUpperInvariant(part[0]);
+                    else if (part.Length > 1 && part[0] is 'F' or 'f' &&
+                        int.TryParse(part[1..], out var functionKey) && functionKey is >= 1 and <= 24)
+                        key = (uint)(0x70 + functionKey - 1);
+                    else
+                        return false;
+                    break;
+            }
+        }
+        return modifiers != 0 && key != 0;
     }
 
     internal void ShowNotification(string title, string message)
@@ -150,6 +215,13 @@ internal sealed class SystemTrayIcon : IDisposable
                 var mouseMessage = (uint)(lParam.ToInt64() & 0xFFFF);
                 if (mouseMessage is MouseRightButtonUp or ContextMenu)
                     ShowContextMenu();
+                else if (mouseMessage is MouseLeftButtonUp or MouseLeftButtonDoubleClick)
+                    RaiseOpenLauncher();
+                return nint.Zero;
+            }
+            if (message == WindowHotKey && wParam.ToInt32() == QuickLauncherHotKeyId)
+            {
+                RaiseOpenLauncher();
                 return nint.Zero;
             }
         }
@@ -158,18 +230,28 @@ internal sealed class SystemTrayIcon : IDisposable
         return DefWindowProc(window, message, wParam, lParam);
     }
 
+    private void RaiseOpenLauncher()
+    {
+        var now = Environment.TickCount64;
+        if (now - _lastLauncherInvocation < 300) return;
+        _lastLauncherInvocation = now;
+        OpenLauncherRequested?.Invoke();
+    }
+
     private void ShowContextMenu()
     {
         var menu = CreatePopupMenu();
         if (menu == nint.Zero) return;
         try
         {
+            AppendMenu(menu, MenuString, MenuOpenLauncher, Strings.Get("新建 Goose 任务", "New Goose task"));
+            AppendMenu(menu, MenuSeparator, 0, null);
             AppendMenu(menu, MenuString, MenuOpenGoose, Strings.Get("打开 Goose Desktop", "Open Goose Desktop"));
             AppendMenu(menu, MenuString, MenuOpenCli, Strings.Get("打开 Goose CLI", "Open Goose CLI"));
             AppendMenu(menu, MenuString, MenuSettings, Strings.Get("设置", "Settings"));
             AppendMenu(menu, MenuSeparator, 0, null);
             AppendMenu(menu, MenuString, MenuExit, Strings.Get("退出 Goose", "Exit Goose"));
-            SetMenuDefaultItem(menu, MenuOpenGoose, false);
+            SetMenuDefaultItem(menu, MenuOpenLauncher, false);
             GetCursorPos(out var cursor);
             SetForegroundWindow(_windowHandle);
             var command = TrackPopupMenuEx(menu, TrackRightButton | TrackReturnCommand | TrackNoNotify,
@@ -177,6 +259,7 @@ internal sealed class SystemTrayIcon : IDisposable
             PostMessage(_windowHandle, WindowNull, nint.Zero, nint.Zero);
             switch (command)
             {
+                case MenuOpenLauncher: OpenLauncherRequested?.Invoke(); break;
                 case MenuOpenGoose: OpenGooseRequested?.Invoke(); break;
                 case MenuOpenCli: OpenCliRequested?.Invoke(); break;
                 case MenuSettings: SettingsRequested?.Invoke(); break;
@@ -193,6 +276,7 @@ internal sealed class SystemTrayIcon : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        if (_hotKeyRegistered) UnregisterHotKey(_windowHandle, QuickLauncherHotKeyId);
         if (_windowHandle != nint.Zero) KillTimer(_windowHandle, RetryTimerId);
         if (_iconAdded)
         {
@@ -269,4 +353,6 @@ internal sealed class SystemTrayIcon : IDisposable
     [DllImport("user32.dll")] private static extern bool PostMessage(nint window, uint message, nint wParam, nint lParam);
     [DllImport("user32.dll")] private static extern nuint SetTimer(nint window, nuint id, uint milliseconds, nint callback);
     [DllImport("user32.dll")] private static extern bool KillTimer(nint window, nuint id);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(nint window, int id, uint modifiers, uint virtualKey);
+    [DllImport("user32.dll")] private static extern bool UnregisterHotKey(nint window, int id);
 }

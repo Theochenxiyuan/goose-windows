@@ -2,11 +2,12 @@
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
   xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap desktop4 desktop5 com rescap">
+  IgnorableNamespaces="uap desktop desktop4 desktop5 com rescap">
   <Identity Name="__GOOSE_PACKAGE_IDENTITY__" Publisher="CN=REPLACE_WITH_SIGNING_IDENTITY" Version="__GOOSE_PACKAGE_VERSION__" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>__GOOSE_DISPLAY_NAME__</DisplayName>
@@ -28,6 +29,9 @@
                           Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
       <Extensions>
         <uap:Extension Category="windows.protocol"><uap:Protocol Name="goosecompanion" /></uap:Extension>
+        <desktop:Extension Category="windows.startupTask" Executable="launcher\GooseLauncher.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="GooseLauncherStartup" Enabled="false" DisplayName="Goose Launcher" />
+        </desktop:Extension>
         <com:Extension Category="windows.comServer">
           <com:ComServer>
             <com:SurrogateServer DisplayName="Goose Explorer Command">

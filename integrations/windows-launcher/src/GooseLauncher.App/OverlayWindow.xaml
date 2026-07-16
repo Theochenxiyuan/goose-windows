@@ -87,18 +87,24 @@
         </Grid.RowDefinitions>
         <Grid x:Name="ModelSelectionPanel" ColumnSpacing="10">
           <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="150" />
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
+          <TextBox
+              x:Name="ModelSearchTextBox"
+              Header="Search models"
+              PlaceholderText="Provider or model"
+              TextChanged="ModelSearchTextBox_TextChanged" />
           <ComboBox
               x:Name="ModelComboBox"
+              Grid.Column="1"
               Header="Model"
               HorizontalAlignment="Stretch"
-              DisplayMemberPath="Label"
               SelectionChanged="ModelComboBox_SelectionChanged" />
           <ComboBox
               x:Name="ThinkingEffortComboBox"
-              Grid.Column="1"
+              Grid.Column="2"
               Width="150"
               Header="Reasoning effort"
               DisplayMemberPath="Label"

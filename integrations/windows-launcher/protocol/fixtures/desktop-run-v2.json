@@ -1,0 +1,15 @@
+{
+  "protocolVersion": 2,
+  "requestId": "golden-request-1",
+  "action": "run",
+  "authToken": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "cwd": "C:\\Goose Fixture",
+  "prompt": "Inspect the selected file.",
+  "files": ["C:\\Goose Fixture\\example.txt"],
+  "bringToFront": true,
+  "sessionSelection": {
+    "provider": "chatgpt_codex",
+    "model": "gpt-5.4",
+    "thinkingEffort": "high"
+  }
+}

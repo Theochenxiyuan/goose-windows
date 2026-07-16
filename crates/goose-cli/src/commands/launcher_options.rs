@@ -31,6 +31,7 @@ struct LauncherModel {
     id: String,
     name: String,
     reasoning: bool,
+    thinking_efforts: Vec<&'static str>,
 }
 
 fn launcher_provider(
@@ -63,12 +64,20 @@ fn launcher_provider(
     let mut models = entry
         .models
         .into_iter()
-        .map(|model| LauncherModel {
-            reasoning: model
+        .map(|model| {
+            let reasoning = model
                 .reasoning
-                .unwrap_or_else(|| ModelConfig::new(&model.id).is_reasoning_model()),
-            id: model.id,
-            name: model.name,
+                .unwrap_or_else(|| ModelConfig::new(&model.id).is_reasoning_model());
+            LauncherModel {
+                reasoning,
+                thinking_efforts: if reasoning {
+                    vec!["off", "low", "medium", "high", "max"]
+                } else {
+                    vec![]
+                },
+                id: model.id,
+                name: model.name,
+            }
         })
         .collect::<Vec<_>>();
     models.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));

@@ -117,6 +117,26 @@ namespace
         WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), result.data(), size, nullptr, nullptr); return result;
     }
 
+    void LogDiagnostic(const wchar_t* code) noexcept
+    {
+        wchar_t localAppData[MAX_PATH]{};
+        if (!GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, ARRAYSIZE(localAppData))) return;
+        std::wstring directory(localAppData);
+        directory += L"\\GooseLauncher";
+        CreateDirectoryW(directory.c_str(), nullptr);
+        const auto filePath = directory + L"\\diagnostics.log";
+        const auto file = CreateFileW(filePath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return;
+        SYSTEMTIME time{}; GetSystemTime(&time);
+        wchar_t line[256]{};
+        swprintf_s(line, L"{\"timestamp\":\"%04u-%02u-%02uT%02u:%02u:%02uZ\",\"stage\":\"shell_extension\",\"code\":\"%ls\"}\r\n",
+            time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond, code);
+        const auto utf8 = Utf8(line);
+        DWORD written = 0; WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
+        CloseHandle(file);
+    }
+
     std::wstring SerializeFiles(const std::vector<std::wstring>& files)
     {
         std::wstring json = L"[";
@@ -193,12 +213,21 @@ HRESULT ExplorerCommand::Invoke(IShellItemArray* items, IBindCtx*) noexcept
     try
     {
         std::wstring folder; std::vector<std::wstring> files;
-        const auto result = ResolveActivation(items, site_.Get(), folder, files); if (FAILED(result)) return result;
+        const auto result = ResolveActivation(items, site_.Get(), folder, files);
+        if (FAILED(result)) { LogDiagnostic(L"invalid_selection"); return result; }
         const auto cursor = InvocationOrigin();
-        if (SendWarmActivation(folder, files, cursor) == ActivationResult::Unavailable) ActivateCold(folder, files, cursor);
+        const auto activation = SendWarmActivation(folder, files, cursor);
+        if (activation == ActivationResult::Unavailable)
+        {
+            LogDiagnostic(L"cold_start");
+            ActivateCold(folder, files, cursor);
+        }
+        else if (activation == ActivationResult::Busy) LogDiagnostic(L"busy");
+        else LogDiagnostic(L"accepted");
         return S_OK;
     }
-    catch (const std::bad_alloc&) { return E_OUTOFMEMORY; } catch (...) { return E_FAIL; }
+    catch (const std::bad_alloc&) { LogDiagnostic(L"out_of_memory"); return E_OUTOFMEMORY; }
+    catch (...) { LogDiagnostic(L"unexpected_error"); return E_FAIL; }
 }
 void ExplorerCommand::CaptureInvocationOrigin() noexcept
 {

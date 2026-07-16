@@ -11,6 +11,7 @@ public sealed class DesktopActivationClient
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(45);
     private readonly string _endpointPath;
     private readonly Action<GooseInstallation> _startDesktop;
+    private readonly TimeSpan _timeout;
 
     public DesktopActivationClient()
         : this(DefaultEndpointPath, installation =>
@@ -21,10 +22,14 @@ public sealed class DesktopActivationClient
     {
     }
 
-    internal DesktopActivationClient(string endpointPath, Action<GooseInstallation> startDesktop)
+    internal DesktopActivationClient(
+        string endpointPath,
+        Action<GooseInstallation> startDesktop,
+        TimeSpan? timeout = null)
     {
         _endpointPath = endpointPath;
         _startDesktop = startDesktop;
+        _timeout = timeout ?? DefaultTimeout;
     }
 
     public static string DefaultEndpointPath { get; } = Path.Combine(
@@ -41,9 +46,10 @@ public sealed class DesktopActivationClient
         LauncherSessionSelection? sessionSelection = null,
         CancellationToken cancellationToken = default)
     {
+        var stopwatch = Stopwatch.StartNew();
         var requestId = Guid.NewGuid().ToString("D");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(DefaultTimeout);
+        timeout.CancelAfter(_timeout);
         var started = false;
         try
         {
@@ -54,7 +60,7 @@ public sealed class DesktopActivationClient
                 {
                     try
                     {
-                        await EnsureCompatibleAsync(endpoint, timeout.Token);
+                        await EnsureCompatibleAsync(endpoint, sessionSelection is not null, timeout.Token);
                         var response = await SendAsync(endpoint, DesktopActivationProtocol.EncodeRequest(
                             requestId,
                             "run",
@@ -64,6 +70,7 @@ public sealed class DesktopActivationClient
                             files.Select(Path.GetFullPath).ToArray(),
                             sessionSelection: sessionSelection), timeout.Token);
                         ValidateAccepted(response, requestId);
+                        LauncherDiagnostics.Record("desktop_activation", "accepted", stopwatch.ElapsedMilliseconds);
                         return;
                     }
                     catch (DesktopActivationRejectedException) { throw; }
@@ -83,12 +90,29 @@ public sealed class DesktopActivationClient
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            LauncherDiagnostics.Record("desktop_activation", "timeout", stopwatch.ElapsedMilliseconds);
             throw new TimeoutException("Goose Desktop did not accept the task before the activation timeout.");
+        }
+        catch (DesktopActivationRejectedException)
+        {
+            LauncherDiagnostics.Record("desktop_activation", "rejected", stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (NotSupportedException)
+        {
+            LauncherDiagnostics.Record("desktop_activation", "incompatible", stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            LauncherDiagnostics.Record("desktop_activation", "cancelled", stopwatch.ElapsedMilliseconds);
+            throw;
         }
     }
 
     private async Task EnsureCompatibleAsync(
         DesktopActivationEndpoint endpoint,
+        bool requiresSessionSelection,
         CancellationToken cancellationToken)
     {
         if (endpoint.ProtocolVersion != DesktopActivationProtocol.Version)
@@ -103,7 +127,7 @@ public sealed class DesktopActivationClient
         ValidateAccepted(response, requestId);
         if (response.Capabilities?.Actions.Contains("run", StringComparer.Ordinal) != true)
             throw new NotSupportedException("Goose Desktop does not support Launcher run activation.");
-        if (response.Capabilities?.SessionSelection != true)
+        if (requiresSessionSelection && response.Capabilities?.SessionSelection != true)
             throw new NotSupportedException("Goose Desktop does not support Launcher session selection.");
     }
 

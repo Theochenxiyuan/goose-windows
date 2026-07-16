@@ -21,6 +21,8 @@ The endpoint metadata is stored below `%LOCALAPPDATA%\Goose\launcher` and contai
 
 Frames use a four-byte little-endian payload length followed by UTF-8 JSON. Version 2 supports `ping`, `capabilities`, `run`, `open`, and optional session selection. Requests include `protocolVersion`, `requestId`, `action`, `cwd`, `prompt`, `files`, and `bringToFront`; the authentication token is transport metadata. Payloads are limited to 256 KiB, prompts to 64 KiB, and files to eight sibling paths.
 
+The versioned source contracts and cross-language golden fixtures live under `protocol/`. C#, TypeScript, and C++ changes must update those files and their contract tests in the same change.
+
 The Desktop validates the protocol version, payload shape, directory, every file, and the authentication token. It shares in-flight work and caches acknowledgements by request id so concurrent or later Launcher retries cannot create duplicate sessions. The Launcher hides the overlay only after an `accepted` renderer acknowledgement.
 
 Explorer activations are acknowledged only after the Launcher UI accepts them. While a Desktop handoff is running, the overlay keeps up to eight pending activations; a full queue returns an explicit busy response instead of silently dropping context.

@@ -1,36 +1,32 @@
-using Microsoft.Win32;
+using Windows.ApplicationModel;
 
 namespace GooseLauncher.App;
 
 internal static class StartupRegistration
 {
-    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ValueName = "GooseLauncher";
+    internal const string TaskId = "GooseLauncherStartup";
 
-    internal static bool IsEnabled
+    internal static async Task<bool> IsEnabledAsync()
     {
-        get
-        {
-            try
-            {
-                using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
-                return key?.GetValue(ValueName) is string value && !string.IsNullOrWhiteSpace(value);
-            }
-            catch { return false; }
-        }
+        var task = await StartupTask.GetAsync(TaskId);
+        return task.State is StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy;
     }
 
-    internal static void SetEnabled(bool enabled)
+    internal static async Task SetEnabledAsync(bool enabled)
     {
-        using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true)
-            ?? throw new InvalidOperationException("Could not open the current-user startup registry key.");
+        var task = await StartupTask.GetAsync(TaskId);
         if (!enabled)
         {
-            key.DeleteValue(ValueName, throwOnMissingValue: false);
+            task.Disable();
             return;
         }
 
-        var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
-        key.SetValue(ValueName, $"\"{explorer}\" \"goosecompanion://tray\"", RegistryValueKind.String);
+        var state = await task.RequestEnableAsync();
+        if (state is not (StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy))
+            throw new InvalidOperationException(state == StartupTaskState.DisabledByUser
+                ? Strings.Get(
+                    "Windows 已阻止此启动项。请在 Windows 设置的“启动应用”中启用 Goose。",
+                    "Windows has blocked this startup item. Enable Goose in Windows Startup Apps settings.")
+                : Strings.Get("无法启用 Windows 启动项。", "Could not enable the Windows startup item."));
     }
 }

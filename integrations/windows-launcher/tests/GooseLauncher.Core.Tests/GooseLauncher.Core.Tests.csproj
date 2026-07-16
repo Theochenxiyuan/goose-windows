@@ -12,4 +12,7 @@
     <PackageReference Include="MSTest.TestFramework" Version="3.10.4" />
     <ProjectReference Include="..\..\src\GooseLauncher.Core\GooseLauncher.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\protocol\fixtures\*.json" Link="protocol\fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

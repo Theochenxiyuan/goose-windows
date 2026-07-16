@@ -9,7 +9,9 @@ public enum GooseRunTarget
     Terminal,
 }
 
-public sealed record CompanionSettings(GooseRunTarget RunTarget = GooseRunTarget.Desktop);
+public sealed record CompanionSettings(
+    GooseRunTarget RunTarget = GooseRunTarget.Desktop,
+    string QuickLauncherShortcut = "Ctrl+Alt+Shift+G");
 
 public static class CompanionSettingsStore
 {

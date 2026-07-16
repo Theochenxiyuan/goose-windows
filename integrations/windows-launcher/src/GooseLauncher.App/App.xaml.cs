@@ -1,5 +1,6 @@
 using System.Security.Principal;
 using GooseLauncher.Core;
+using Microsoft.Windows.AppLifecycle;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 
@@ -25,7 +26,8 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         _ = args;
-        var launchToTray = IsTrayLaunch(Program.CommandLineArgs);
+        var launchToTray = IsTrayLaunch(Program.CommandLineArgs) ||
+            AppInstance.GetCurrent().GetActivatedEventArgs().Kind == ExtendedActivationKind.StartupTask;
         var launchToSettings = IsSettingsLaunch(Program.CommandLineArgs);
         var request = ParseActivation(Program.CommandLineArgs);
         var sid = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
@@ -35,30 +37,45 @@ public partial class App : Application
             if (launchToTray)
                 Exit();
             else if (launchToSettings)
-                Exit();
+                _ = RedirectSettingsAndExitAsync();
             else
-                _ = RedirectAndExitAsync(request ?? ActivationRequest.Create(Environment.CurrentDirectory));
+                _ = RedirectAndExitAsync(request ?? DefaultActivation());
             return;
         }
 
         _overlay = new OverlayWindow();
 
-        _pipeServer = new ActivationPipeServer(DispatchActivationAsync);
+        _pipeServer = new ActivationPipeServer(DispatchActivationAsync, DispatchSettingsAsync);
         _pipeServer.DiagnosticReceived += message =>
             _overlay.DispatcherQueue.TryEnqueue(() => _overlay.SetDiagnostic(message));
         _pipeServer.Start();
 
         _tray = new SystemTrayIcon();
+        _tray.OpenLauncherRequested += ShowLauncher;
         _tray.OpenGooseRequested += OpenGooseFromTray;
         _tray.OpenCliRequested += OpenCliFromTray;
         _tray.SettingsRequested += () => ShowSettings(_overlay.AppWindow);
         _tray.ExitRequested += ExitApp;
         _tray.Initialize();
+        ApplyQuickLauncherShortcut();
+        LauncherDiagnostics.Record("launcher_start", "ready");
 
         if (launchToSettings)
             ShowSettings(_overlay.AppWindow);
         else if (!launchToTray)
-            _overlay.ShowActivation(request ?? ActivationRequest.Create(Environment.CurrentDirectory));
+            _overlay.ShowActivation(request ?? DefaultActivation());
+    }
+
+    private Task DispatchSettingsAsync()
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (_overlay?.DispatcherQueue.TryEnqueue(() =>
+        {
+            ShowSettings(_overlay.AppWindow);
+            completion.SetResult();
+        }) != true)
+            completion.SetException(new InvalidOperationException("Launcher UI is unavailable."));
+        return completion.Task;
     }
 
     private Task<ActivationAcceptance> DispatchActivationAsync(ActivationRequest activation)
@@ -84,6 +101,13 @@ public partial class App : Application
         Exit();
     }
 
+    private async Task RedirectSettingsAndExitAsync()
+    {
+        await ActivationPipeServer.TrySendSettingsAsync(TimeSpan.FromSeconds(3));
+        _singleInstance?.Dispose();
+        Exit();
+    }
+
     private static bool IsTrayLaunch(string[] args)
     {
         if (args.Any(value => value.Equals("--tray", StringComparison.OrdinalIgnoreCase))) return true;
@@ -99,8 +123,23 @@ public partial class App : Application
         return false;
     }
 
-    private static bool IsSettingsLaunch(string[] args) =>
-        args.Any(value => value.Equals("--settings", StringComparison.OrdinalIgnoreCase));
+    private static bool IsSettingsLaunch(string[] args)
+    {
+        if (args.Any(value => value.Equals("--settings", StringComparison.OrdinalIgnoreCase))) return true;
+        foreach (var value in args)
+        {
+            if (!value.StartsWith("goosecompanion:", StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                if (new Uri(value).Host.Equals("settings", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            catch { }
+        }
+        return false;
+    }
+
+    private static ActivationRequest DefaultActivation() => ActivationRequest.Create(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
     private static ActivationRequest? ParseActivation(string[] args)
     {
@@ -129,6 +168,7 @@ public partial class App : Application
         var window = new SettingsWindow();
         window.SettingsSaved += () =>
         {
+            ApplyQuickLauncherShortcut();
             if (_overlay is not null) _ = _overlay.OnSettingsChangedAsync();
         };
         return window;
@@ -137,6 +177,27 @@ public partial class App : Application
     internal void SetBusy(bool busy) => _tray?.SetBusy(busy);
 
     internal void ShowNotification(string title, string message) => _tray?.ShowNotification(title, message);
+
+    private void ShowLauncher()
+    {
+        var folder = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        _overlay?.TryShowActivation(ActivationRequest.Create(folder));
+    }
+
+    private void ApplyQuickLauncherShortcut()
+    {
+        if (_tray?.SetQuickLauncherShortcut(CompanionSettingsStore.Load().QuickLauncherShortcut) == false)
+        {
+            LauncherDiagnostics.Record("global_shortcut", "registration_failed");
+            ShowNotification(
+                Strings.Get("Goose 快捷键不可用", "Goose shortcut unavailable"),
+                Strings.Get("请在 Launcher 设置中选择其他快捷键。", "Choose another shortcut in Launcher settings."));
+        }
+        else
+        {
+            LauncherDiagnostics.Record("global_shortcut", "registered");
+        }
+    }
 
     private void OpenGooseFromTray()
     {

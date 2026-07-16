@@ -102,6 +102,7 @@ const MENU_TRANSLATIONS_ZH_CN: Record<string, string> = {
   'Recent Directories': '最近的目录',
   'Focus Goose Window': '聚焦 Goose 窗口',
   'Quick Launcher': '快速启动器',
+  'Launcher Settings': '启动器设置',
   'Always on Top': '窗口置顶',
   'Toggle Navigation': '切换导航',
   'About Goose': '关于 Goose',
@@ -2498,7 +2499,7 @@ const registerGlobalShortcuts = () => {
     }
   }
 
-  if (shortcuts.quickLauncher) {
+  if (process.platform !== 'win32' && shortcuts.quickLauncher) {
     try {
       globalShortcut.register(shortcuts.quickLauncher, () => {
         createLauncher();
@@ -2506,6 +2507,14 @@ const registerGlobalShortcuts = () => {
     } catch (e) {
       console.error('Error registering launcher hotkey:', e);
     }
+  }
+};
+
+const openNativeWindowsLauncher = async (target: 'show' | 'settings') => {
+  try {
+    await shell.openExternal(`goosecompanion://${target}`);
+  } catch (error) {
+    log.error(`[WindowsLauncher] Could not open ${target}:`, formatErrorForLogging(error));
   }
 };
 
@@ -2803,10 +2812,21 @@ async function appMain() {
           label: menuT('Quick Launcher'),
           accelerator: shortcuts.quickLauncher,
           click() {
-            createLauncher();
+            if (process.platform === 'win32') void openNativeWindowsLauncher('show');
+            else createLauncher();
           },
         })
       );
+      if (process.platform === 'win32') {
+        fileMenu.submenu.append(
+          new MenuItem({
+            label: menuT('Launcher Settings'),
+            click() {
+              void openNativeWindowsLauncher('settings');
+            },
+          })
+        );
+      }
     }
   }
 

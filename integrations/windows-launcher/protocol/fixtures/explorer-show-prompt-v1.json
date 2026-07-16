@@ -1,0 +1,8 @@
+{
+  "protocolVersion": 1,
+  "type": "show_prompt",
+  "folder": "C:\\Goose Fixture",
+  "files": ["C:\\Goose Fixture\\example.txt"],
+  "x": 120,
+  "y": 240
+}

@@ -2,6 +2,7 @@ using GooseLauncher.Core;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace GooseLauncher.App;
 
@@ -30,26 +31,42 @@ public sealed partial class SettingsWindow : Window
         ApplyStrings();
     }
 
-    internal void ShowSettings(AppWindow? relativeTo = null)
+    internal async void ShowSettings(AppWindow? relativeTo = null)
     {
         var settings = CompanionSettingsStore.Load();
         RunTargetComboBox.SelectedItem = settings.RunTarget == GooseRunTarget.Terminal ? TerminalTargetItem : DesktopTargetItem;
-        StartWithWindowsToggle.IsOn = StartupRegistration.IsEnabled;
+        QuickLauncherShortcutTextBox.Text = settings.QuickLauncherShortcut;
         ResultInfoBar.IsOpen = false;
+        try
+        {
+            StartWithWindowsToggle.IsOn = await StartupRegistration.IsEnabledAsync();
+            StartWithWindowsToggle.IsEnabled = true;
+        }
+        catch (Exception error)
+        {
+            StartWithWindowsToggle.IsEnabled = false;
+            LauncherDiagnostics.Record("startup_task", error.GetType().Name);
+        }
         if (relativeTo is not null) PositionRelativeTo(relativeTo);
         AppWindow.Show();
         Activate();
     }
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    private async void Save_Click(object sender, RoutedEventArgs e)
     {
         try
         {
             var target = (RunTargetComboBox.SelectedItem as ComboBoxItem)?.Tag as string == "Terminal"
                 ? GooseRunTarget.Terminal
                 : GooseRunTarget.Desktop;
-            CompanionSettingsStore.Save(new CompanionSettings(target));
-            StartupRegistration.SetEnabled(StartWithWindowsToggle.IsOn);
+            var shortcut = QuickLauncherShortcutTextBox.Text.Trim();
+            if (!SystemTrayIcon.IsSupportedShortcut(shortcut))
+                throw new InvalidDataException(Strings.Get(
+                    "快捷键格式无效。请使用 Ctrl/Alt/Shift/Win 加一个字母、数字或功能键。",
+                    "Invalid shortcut. Use Ctrl/Alt/Shift/Win plus a letter, number, or function key."));
+            CompanionSettingsStore.Save(new CompanionSettings(target, shortcut));
+            if (StartWithWindowsToggle.IsEnabled)
+                await StartupRegistration.SetEnabledAsync(StartWithWindowsToggle.IsOn);
             SettingsSaved?.Invoke();
             ResultInfoBar.Severity = InfoBarSeverity.Success;
             ResultInfoBar.Title = Strings.Get("已保存", "Saved");
@@ -78,6 +95,20 @@ public sealed partial class SettingsWindow : Window
 
     private void Close_Click(object sender, RoutedEventArgs e) => AppWindow.Hide();
 
+    private void CopyDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        var data = new DataPackage();
+        data.SetText(LauncherDiagnostics.CreateReport());
+        Clipboard.SetContent(data);
+        Clipboard.Flush();
+        ResultInfoBar.Severity = InfoBarSeverity.Success;
+        ResultInfoBar.Title = Strings.Get("诊断信息已复制", "Diagnostics copied");
+        ResultInfoBar.Message = Strings.Get(
+            "内容不包含提示词或文件路径。",
+            "The report contains no prompts or file paths.");
+        ResultInfoBar.IsOpen = true;
+    }
+
     internal void CloseForExit()
     {
         _allowClose = true;
@@ -101,7 +132,9 @@ public sealed partial class SettingsWindow : Window
         StartWithWindowsToggle.Header = Strings.Get("随 Windows 启动", "Start with Windows");
         StartWithWindowsToggle.OnContent = Strings.Get("开", "On");
         StartWithWindowsToggle.OffContent = Strings.Get("关", "Off");
+        QuickLauncherShortcutTextBox.Header = Strings.Get("快速启动器快捷键", "Quick Launcher shortcut");
         CloseButton.Content = Strings.Get("关闭", "Close");
+        CopyDiagnosticsButton.Content = Strings.Get("复制诊断信息", "Copy diagnostics");
         SaveButton.Content = Strings.Get("保存", "Save");
     }
 }

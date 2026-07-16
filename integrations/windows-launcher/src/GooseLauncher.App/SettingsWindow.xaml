@@ -41,6 +41,11 @@
           OffContent="Off"
           OnContent="On" />
 
+      <TextBox
+          x:Name="QuickLauncherShortcutTextBox"
+          Header="Quick Launcher shortcut"
+          PlaceholderText="Ctrl+Alt+Shift+G" />
+
       <InfoBar x:Name="ResultInfoBar" IsOpen="False" IsClosable="True" />
     </StackPanel>
 
@@ -49,9 +54,11 @@
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <Button x:Name="CloseButton" Grid.Column="1" Content="Close" Click="Close_Click" />
-      <Button x:Name="SaveButton" Grid.Column="2" Content="Save" Click="Save_Click" Style="{StaticResource AccentButtonStyle}" />
+      <Button x:Name="CopyDiagnosticsButton" Grid.Column="1" Content="Copy diagnostics" Click="CopyDiagnostics_Click" />
+      <Button x:Name="CloseButton" Grid.Column="2" Content="Close" Click="Close_Click" />
+      <Button x:Name="SaveButton" Grid.Column="3" Content="Save" Click="Save_Click" Style="{StaticResource AccentButtonStyle}" />
     </Grid>
   </Grid>
 </Window>

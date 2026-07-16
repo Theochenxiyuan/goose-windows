@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://goose.ai/schemas/windows/explorer-activation-v1.json",
+  "title": "Goose Explorer to Launcher activation protocol v1",
+  "type": "object",
+  "required": ["protocolVersion", "type"],
+  "properties": {
+    "protocolVersion": { "const": 1 },
+    "type": { "enum": ["show_prompt", "show_settings"] },
+    "folder": { "type": "string", "minLength": 1, "maxLength": 32767 },
+    "files": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 32767 } },
+    "x": { "type": "integer" },
+    "y": { "type": "integer" }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "show_prompt" } } },
+      "then": { "required": ["folder"] },
+      "else": {
+        "not": { "anyOf": [{ "required": ["folder"] }, { "required": ["files"] }, { "required": ["x"] }, { "required": ["y"] }] }
+      }
+    }
+  ]
+}

@@ -41,6 +41,8 @@ public sealed partial class OverlayWindow : Window
     private Windows.Graphics.PointInt32 _moveStartPosition;
     private int _launcherOptionsLoadVersion;
     private LauncherOptionsCatalog? _launcherOptions;
+    private readonly LauncherOptionsClient _launcherOptionsClient = new();
+    private CancellationTokenSource? _launcherOptionsCancellation;
 
     internal string CurrentFolderForLaunch => _hasActivationContext
         ? _activation.Folder
@@ -208,6 +210,7 @@ public sealed partial class OverlayWindow : Window
     {
         _running = submitting;
         PromptTextBox.IsEnabled = !submitting;
+        ModelSearchTextBox.IsEnabled = !submitting;
         ModelComboBox.IsEnabled = !submitting;
         ThinkingEffortComboBox.IsEnabled = !submitting;
         CloseButton.IsEnabled = !submitting;
@@ -272,17 +275,16 @@ public sealed partial class OverlayWindow : Window
     private sealed record ModelChoice(
         string Label,
         string? Provider,
+        string? ProviderLabel,
         string? Model,
-        bool Reasoning);
+        IReadOnlyList<string> ThinkingEfforts);
 
     private sealed record ThinkingEffortChoice(string Value, string Label);
 
     private void InitializeModelSelectors()
     {
-        ModelComboBox.ItemsSource = new[] { DefaultModelChoice() };
-        ModelComboBox.SelectedIndex = 0;
-        ThinkingEffortComboBox.ItemsSource = ThinkingEffortChoices();
-        ThinkingEffortComboBox.SelectedIndex = 0;
+        PopulateModelChoices(null);
+        SetThinkingEffortChoices([]);
     }
 
     private ModelChoice DefaultModelChoice()
@@ -294,17 +296,68 @@ public sealed partial class OverlayWindow : Window
             Strings.Get("使用 Goose 默认设置", "Use Goose default") + suffix,
             null,
             null,
-            false);
+            null,
+            []);
     }
 
-    private static IReadOnlyList<ThinkingEffortChoice> ThinkingEffortChoices() =>
-    [
-        new("off", Strings.Get("关闭", "Off")),
-        new("low", Strings.Get("低", "Low")),
-        new("medium", Strings.Get("中", "Medium")),
-        new("high", Strings.Get("高", "High")),
-        new("max", Strings.Get("最高", "Max")),
-    ];
+    private static ThinkingEffortChoice ThinkingEffortChoiceFor(string value) => value switch
+    {
+        "off" => new(value, Strings.Get("关闭", "Off")),
+        "low" => new(value, Strings.Get("低", "Low")),
+        "medium" => new(value, Strings.Get("中", "Medium")),
+        "high" => new(value, Strings.Get("高", "High")),
+        "max" => new(value, Strings.Get("最高", "Max")),
+        _ => new(value, value),
+    };
+
+    private void SetThinkingEffortChoices(IReadOnlyList<string> values)
+    {
+        var previous = (ThinkingEffortComboBox.SelectedItem as ThinkingEffortChoice)?.Value;
+        var choices = values.Select(ThinkingEffortChoiceFor).ToArray();
+        ThinkingEffortComboBox.ItemsSource = choices;
+        ThinkingEffortComboBox.SelectedItem = choices.FirstOrDefault(choice => choice.Value == previous)
+            ?? choices.FirstOrDefault(choice => choice.Value == _launcherOptions?.DefaultThinkingEffort)
+            ?? choices.FirstOrDefault();
+        ThinkingEffortComboBox.Visibility = choices.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void PopulateModelChoices(ModelChoice? selected)
+    {
+        var query = ModelSearchTextBox?.Text.Trim() ?? string.Empty;
+        ModelComboBox.Items.Clear();
+        var defaultItem = new ComboBoxItem { Content = DefaultModelChoice().Label, Tag = DefaultModelChoice() };
+        ModelComboBox.Items.Add(defaultItem);
+
+        if (_launcherOptions is not null)
+        {
+            foreach (var provider in _launcherOptions.Providers)
+            {
+                var models = provider.Models.Where(model =>
+                    query.Length == 0 ||
+                    provider.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
+                    provider.Id.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    model.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
+                    model.Id.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (models.Length == 0) continue;
+
+                ModelComboBox.Items.Add(new ComboBoxItem
+                {
+                    Content = provider.Name,
+                    IsEnabled = false,
+                    Opacity = 0.7,
+                });
+                foreach (var model in models)
+                {
+                    var choice = new ModelChoice(model.Name, provider.Id, provider.Name, model.Id, model.ThinkingEfforts ?? []);
+                    ModelComboBox.Items.Add(new ComboBoxItem { Content = model.Name, Tag = choice });
+                }
+            }
+        }
+
+        ModelComboBox.SelectedItem = ModelComboBox.Items.OfType<ComboBoxItem>().FirstOrDefault(item =>
+            item.Tag is ModelChoice choice && choice.Provider == selected?.Provider && choice.Model == selected?.Model)
+            ?? defaultItem;
+    }
 
     private async Task LoadLauncherOptionsAsync()
     {
@@ -312,52 +365,54 @@ public sealed partial class OverlayWindow : Window
         if (installation is null) return;
 
         var loadVersion = ++_launcherOptionsLoadVersion;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        _launcherOptionsCancellation?.Cancel();
+        _launcherOptionsCancellation?.Dispose();
+        var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        _launcherOptionsCancellation = timeout;
         try
         {
-            var catalog = await new LauncherOptionsClient().GetAsync(installation, timeout.Token);
+            var catalog = await _launcherOptionsClient.GetAsync(installation, timeout.Token);
             if (loadVersion != _launcherOptionsLoadVersion) return;
 
-            var previous = ModelComboBox.SelectedItem as ModelChoice;
+            var previous = (ModelComboBox.SelectedItem as ComboBoxItem)?.Tag as ModelChoice;
             _launcherOptions = catalog;
             ToolTipService.SetToolTip(ModelComboBox, null);
-            var choices = new List<ModelChoice> { DefaultModelChoice() };
-            choices.AddRange(catalog.Providers.SelectMany(provider =>
-                provider.Models.Select(model => new ModelChoice(
-                    $"{model.Name}  ·  {provider.Name}",
-                    provider.Id,
-                    model.Id,
-                    model.Reasoning))));
-            ModelComboBox.ItemsSource = choices;
-            ModelComboBox.SelectedItem = choices.FirstOrDefault(choice =>
-                choice.Provider == previous?.Provider && choice.Model == previous?.Model) ?? choices[0];
-
-            var defaultEffort = catalog.DefaultThinkingEffort ?? "off";
-            ThinkingEffortComboBox.SelectedItem = ThinkingEffortChoices()
-                .FirstOrDefault(choice => choice.Value == defaultEffort)
-                ?? ThinkingEffortChoices()[0];
+            PopulateModelChoices(previous);
+        }
+        catch (OperationCanceledException) when (loadVersion != _launcherOptionsLoadVersion)
+        {
         }
         catch (Exception)
         {
+            LauncherDiagnostics.Record("launcher_options", "load_failed");
             ToolTipService.SetToolTip(
                 ModelComboBox,
                 Strings.Get("暂时无法加载模型列表，将使用 Goose 默认设置。", "Models are temporarily unavailable; Goose defaults will be used."));
         }
+        finally
+        {
+            if (ReferenceEquals(_launcherOptionsCancellation, timeout)) _launcherOptionsCancellation = null;
+            timeout.Dispose();
+        }
+    }
+
+    private void ModelSearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        var selected = (ModelComboBox.SelectedItem as ComboBoxItem)?.Tag as ModelChoice;
+        PopulateModelChoices(selected);
     }
 
     private void ModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        ThinkingEffortComboBox.Visibility =
-            ModelComboBox.SelectedItem is ModelChoice { Reasoning: true }
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+        var model = (ModelComboBox.SelectedItem as ComboBoxItem)?.Tag as ModelChoice;
+        SetThinkingEffortChoices(model?.ThinkingEfforts ?? []);
     }
 
     private LauncherSessionSelection? GetSessionSelection()
     {
-        if (ModelComboBox.SelectedItem is not ModelChoice { Provider: not null, Model: not null } model)
+        if ((ModelComboBox.SelectedItem as ComboBoxItem)?.Tag is not ModelChoice { Provider: not null, Model: not null } model)
             return null;
-        var thinkingEffort = model.Reasoning &&
+        var thinkingEffort = model.ThinkingEfforts.Count > 0 &&
             ThinkingEffortComboBox.SelectedItem is ThinkingEffortChoice effort
                 ? effort.Value
                 : null;
@@ -487,6 +542,8 @@ public sealed partial class OverlayWindow : Window
         CloseButton.Content = Strings.Get("关闭", "Close");
         OpenSettingsButton.Content = Strings.Get("设置", "Settings");
         ModelComboBox.Header = Strings.Get("模型", "Model");
+        ModelSearchTextBox.Header = Strings.Get("搜索模型", "Search models");
+        ModelSearchTextBox.PlaceholderText = Strings.Get("提供商或模型", "Provider or model");
         ThinkingEffortComboBox.Header = Strings.Get("推理强度", "Reasoning effort");
         HintTextBlock.Text = GetDefaultHint();
         UpdateOpenTargetButton();
@@ -507,6 +564,8 @@ public sealed partial class OverlayWindow : Window
     public ValueTask DisposeSessionAsync()
     {
         _runCancellation?.Cancel();
+        _launcherOptionsCancellation?.Cancel();
+        _launcherOptionsCancellation?.Dispose();
         return ValueTask.CompletedTask;
     }
 

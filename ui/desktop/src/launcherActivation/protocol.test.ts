@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   DESKTOP_ACTIVATION_PROTOCOL_VERSION,
@@ -22,6 +24,21 @@ function request(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Desktop activation protocol', () => {
+  it('parses the cross-language golden fixture', () => {
+    const fixture = fs.readFileSync(
+      path.resolve(
+        process.cwd(),
+        '../../integrations/windows-launcher/protocol/fixtures/desktop-run-v2.json'
+      )
+    );
+    expect(parseDesktopActivationRequest(fixture)).toMatchObject({
+      protocolVersion: DESKTOP_ACTIVATION_PROTOCOL_VERSION,
+      requestId: 'golden-request-1',
+      action: 'run',
+      sessionSelection: { thinkingEffort: 'high' },
+    });
+  });
+
   it('decodes fragmented Unicode frames', () => {
     const frame = encodeDesktopActivationFrame(request());
     const decoder = new DesktopActivationFrameDecoder();
