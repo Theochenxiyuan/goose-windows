@@ -49,15 +49,19 @@ internal sealed class ActivationPipeServer : IAsyncDisposable
         while (!cancellationToken.IsCancellationRequested)
         {
             Stopwatch? stopwatch = null;
+            var stage = "accept";
             try
             {
                 await using var pipe = new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Message, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await pipe.WaitForConnectionAsync(cancellationToken);
                 stopwatch = Stopwatch.StartNew();
+                stage = "read";
                 var request = await ReadAsync(pipe, cancellationToken);
+                stage = "dispatch";
                 var accepted = request.ShowSettings
                     ? await ShowSettingsAsync()
                     : await _activationHandler(request.Activation!);
+                stage = "write";
                 await pipe.WriteAsync(new byte[] { (byte)accepted }, cancellationToken);
                 await pipe.FlushAsync(cancellationToken);
                 LauncherDiagnostics.Record("explorer_activation", accepted.ToString(), stopwatch.ElapsedMilliseconds);
@@ -65,7 +69,10 @@ internal sealed class ActivationPipeServer : IAsyncDisposable
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             catch (Exception error)
             {
-                LauncherDiagnostics.Record("explorer_activation", error.GetType().Name, stopwatch?.ElapsedMilliseconds);
+                LauncherDiagnostics.Record(
+                    "explorer_activation",
+                    $"{stage}.{error.GetType().Name}.{error.TargetSite?.Name ?? "unknown"}",
+                    stopwatch?.ElapsedMilliseconds);
                 DiagnosticReceived?.Invoke(Strings.Get("Explorer 请求失败。", "Explorer request failed."));
             }
         }
@@ -99,9 +106,16 @@ internal sealed class ActivationPipeServer : IAsyncDisposable
             ? array.EnumerateArray().Select(item => item.GetString()).ToArray()
             : [];
         return new PipeRequest(ActivationRequest.Create(root.GetProperty("folder").GetString()!,
-            root.TryGetProperty("x", out var x) ? x.GetInt32() : null,
-            root.TryGetProperty("y", out var y) ? y.GetInt32() : null,
+            ReadNullableInt(root, "x"),
+            ReadNullableInt(root, "y"),
             files));
+    }
+
+    private static int? ReadNullableInt(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var value) || value.ValueKind == JsonValueKind.Null)
+            return null;
+        return value.GetInt32();
     }
 
     internal static async Task<bool> TrySendAsync(ActivationRequest request, TimeSpan timeout)
