@@ -67,6 +67,14 @@ jobs:
         with:
           node-version: 24.10.0
 
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
+
       - name: Install pnpm
         run: npm install -g pnpm@10.30.3
 
@@ -202,9 +210,15 @@ jobs:
           cd ui/desktop
 
           pnpm install --frozen-lockfile
+          pnpm run lint:check
+          pnpm run test:run
           node scripts/build-main.js
           node scripts/prepare-platform-binaries.js
           pnpm run make --platform=win32 --arch=x64
+
+      - name: Test native Windows Launcher
+        shell: pwsh
+        run: dotnet test .\integrations\windows-launcher\tests\GooseLauncher.Core.Tests\GooseLauncher.Core.Tests.csproj --configuration Release
 
       - name: Copy exe to final out folder and prepare flat distribution
         shell: bash

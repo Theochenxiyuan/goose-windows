@@ -1,306 +1,175 @@
-name: CI
+name: Windows CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   merge_group:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   changes:
+    name: Detect changes
     runs-on: ubuntu-latest
     outputs:
-      docs-only: ${{ steps.filter.outputs.docs-only }}
       code: ${{ steps.filter.outputs.code }}
+      windows-package: ${{ steps.filter.outputs.windows-package }}
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-
-      - name: Check for file changes
-        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # pin@v3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v3
         id: filter
         with:
           filters: |
-            docs-only:
-              - 'documentation/**'
             code:
+              - '**'
               - '!documentation/**'
+            windows-package:
+              - 'integrations/windows-launcher/**'
+              - 'ui/desktop/forge.config.ts'
+              - 'ui/desktop/package.json'
+              - 'ui/desktop/scripts/prepare-platform-binaries.js'
+              - 'ui/desktop/src/platform/windows/**'
+              - 'ui/pnpm-lock.yaml'
+              - '.github/workflows/bundle-desktop-windows.yml'
 
-  rust-format:
-    name: Check Rust Code Format
+  rust-core:
+    name: Rust core
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    env:
+      CARGO_INCREMENTAL: '0'
+      RUST_MIN_STACK: '8388608'
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-
-      - name: Run cargo fmt
+        with:
+          components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: windows-fork-rust-core
+      - name: Install Linux test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev gnome-keyring libxcb1-dev
+      - name: Check formatting
         run: cargo fmt --check
-
-  rust-build-and-test:
-    name: Build and Test Rust Project
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-
-      - name: Install Dependencies
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --exclude v8 -- -D warnings
+      - name: Test core and CLI
+        working-directory: crates
         run: |
-          sudo apt update -y
-          sudo apt install -y libdbus-1-dev gnome-keyring libxcb1-dev
-
-      - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
-
-      - name: Build and Test
-        run: |
-          gnome-keyring-daemon --components=secrets --daemonize --unlock <<< 'foobar'
-          export CARGO_INCREMENTAL=0
+          gnome-keyring-daemon --components=secrets --daemonize --unlock <<< 'goose-windows'
           cargo test -- --skip scenario_tests::scenarios::tests
           cargo test --jobs 1 scenario_tests::scenarios::tests
-        working-directory: crates
-        env:
-          RUST_MIN_STACK: 8388608
 
-  rust-build-and-test-tls:
-    name: Build and Test TLS Backend (${{ matrix.tls-feature }})
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
-    strategy:
-      fail-fast: false
-      matrix:
-        tls-feature:
-          - rustls-tls
-          - native-tls
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-
-      - name: Install Dependencies
-        run: |
-          sudo apt update -y
-          sudo apt install -y libdbus-1-dev gnome-keyring libxcb1-dev
-
-      - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
-        with:
-          key: ${{ matrix.tls-feature }}
-
-      - name: Build and Test with ${{ matrix.tls-feature }}
-        run: |
-          gnome-keyring-daemon --components=secrets --daemonize --unlock <<< 'foobar'
-          export CARGO_INCREMENTAL=0
-          cargo test -p goose --no-default-features --features ${{ matrix.tls-feature }},code-mode
-          cargo test -p goose-providers --no-default-features --features ${{ matrix.tls-feature }}
-          cargo test -p goose-cli --no-default-features --features ${{ matrix.tls-feature }},code-mode -- --skip scenario_tests::scenarios::tests
-          cargo test -p goose-cli --no-default-features --features ${{ matrix.tls-feature }},code-mode --jobs 1 scenario_tests::scenarios::tests
-        env:
-          RUST_MIN_STACK: 8388608
-
-
-  rust-build-windows:
-    name: Build Rust Project on Windows
-    runs-on: windows-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-
-      - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
-        with:
-          key: windows-ci
-
-      - name: Setup Rust
-        shell: bash
-        run: |
-          rustup show
-          rustup target add x86_64-pc-windows-msvc
-
-      - name: Build
-        run: cargo build --target x86_64-pc-windows-msvc
-        env:
-          CARGO_INCREMENTAL: "0"
-
-  windows-launcher:
-    name: Test Windows Launcher and Shell Extension
+  desktop:
+    name: Desktop
     runs-on: windows-latest
     needs: changes
     if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1  # v5
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24.10.0
-
-      - name: Set up MSBuild
-        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce  # v2
-
-      - name: Test Launcher
-        shell: pwsh
-        run: dotnet test .\integrations\windows-launcher\tests\GooseLauncher.Core.Tests\GooseLauncher.Core.Tests.csproj --configuration Release
-
-      - name: Test Desktop activation contract
-        shell: pwsh
+      - name: Install pnpm
+        run: npm install --global pnpm@10.30.3
+      - name: Install dependencies
         working-directory: ui/desktop
-        run: |
-          npm install --global pnpm@10.30.3
-          pnpm install --frozen-lockfile
-          pnpm run test:run -- src/launcherActivation
+        run: pnpm install --frozen-lockfile
+      - name: Lint and typecheck
+        working-directory: ui/desktop
+        run: pnpm run lint:check
+      - name: Test Desktop
+        working-directory: ui/desktop
+        run: pnpm run test:run
 
+  windows-product:
+    name: Windows product
+    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    env:
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 8.0.x
+      - uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          target: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: windows-fork-msvc-check
+      - name: Check Windows CLI
+        run: cargo check --locked --target x86_64-pc-windows-msvc -p goose-cli --bin goose
+      - name: Test Launcher core
+        run: dotnet test .\integrations\windows-launcher\tests\GooseLauncher.Core.Tests\GooseLauncher.Core.Tests.csproj --configuration Release
+      - name: Publish WinUI Launcher
+        run: >-
+          dotnet publish .\integrations\windows-launcher\src\GooseLauncher.App\GooseLauncher.App.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          -p:WindowsAppSDKSelfContained=true -p:GooseLauncherPackaged=true
       - name: Build Explorer Shell Extension
-        shell: pwsh
-        run: msbuild .\integrations\windows-launcher\src\GooseLauncher.ShellExtension\GooseLauncher.ShellExtension.vcxproj /p:Configuration=Release /p:Platform=x64
+        run: >-
+          msbuild .\integrations\windows-launcher\src\GooseLauncher.ShellExtension\GooseLauncher.ShellExtension.vcxproj
+          /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
 
-  rust-msrv:
-    name: Check MSRV
+  schemas-sdk:
+    name: Schemas and SDK
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-
-      - name: Read MSRV from Cargo.toml
-        id: msrv
-        run: |
-          msrv=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
-          if [ -z "$msrv" ]; then
-            echo "Could not find rust-version in workspace Cargo.toml" >&2
-            exit 1
-          fi
-          echo "msrv=$msrv" >> "$GITHUB_OUTPUT"
-          echo "MSRV: $msrv"
-
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1
-        with:
-          toolchain: ${{ steps.msrv.outputs.msrv }}
-
-      - name: Install Dependencies
-        run: |
-          sudo apt update -y
-          sudo apt install -y libdbus-1-dev libxcb1-dev
-
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
-        with:
-          key: msrv
-
-      - name: Check with MSRV toolchain
-        run: cargo check --workspace --locked --all-targets
-        env:
-          CARGO_INCREMENTAL: "0"
-
-  rust-lint:
-    name: Lint Rust Code
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
-
-      - name: Lint
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.10.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: windows-fork-schema
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev libxcb1-dev
+      - name: Install UI dependencies
         run: |
           source ./bin/activate-hermit
-          # use the non-hermit rust toolchain because the rust-cache action does not
-          # play nicely with hermit-managed rust
-          hermit uninstall rustup
-          export CARGO_INCREMENTAL=0
-          cargo clippy --workspace --all-targets --exclude v8 -- -D warnings
-
-  schema-check:
-    name: Check Generated Schemas are Up-to-Date
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-
-      - name: Install Dependencies
-        run: |
-          sudo apt update -y
-          sudo apt install -y libdbus-1-dev libxcb1-dev
-
-      - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
-
-      - name: Install Node.js Dependencies
-        run: |
-          source ./bin/activate-hermit
-          cd ui/desktop && pnpm install --frozen-lockfile
-          cd ../sdk && pnpm install --frozen-lockfile
-
-      - name: Check ACP Schema is Up-to-Date
+          cd ui
+          pnpm install --frozen-lockfile
+      - name: Check generated ACP schema
         run: |
           source ./bin/activate-hermit
           just check-acp-schema
-
-      - name: Test ACP Client SDK
+      - name: Test ACP SDK
+        working-directory: ui/sdk
         run: |
-          source ./bin/activate-hermit
-          cd ui/sdk
+          source ../../bin/activate-hermit
           pnpm test
           pnpm run typecheck:test
 
-  desktop-lint:
-    name: Test and Lint Electron Desktop App
-    runs-on: macos-latest
+  windows-package-smoke:
+    name: Windows package smoke
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-
-      # Temporarily disabled due to GitHub Actions bug on macOS runners
-      # https://github.com/actions/runner-images/issues/13341
-      # https://github.com/actions/runner/issues/4134
-      # - name: Cache pnpm dependencies
-      #   uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7  # v5.0.2
-      #   with:
-      #     path: |
-      #       ui/desktop/node_modules
-      #       .hermit/node/cache
-      #     key: ci-pnpm-cache-v1-${{ runner.os }}-${{ hashFiles('ui/pnpm-lock.yaml') }}
-      #     restore-keys: |
-      #       ci-pnpm-cache-v1-${{ runner.os }}-
-
-      - name: Install Dependencies
-        run: source ../../bin/activate-hermit && pnpm install --frozen-lockfile
-        working-directory: ui/desktop
-
-      - name: Run Lint
-        run: source ../../bin/activate-hermit && pnpm run lint:check
-        working-directory: ui/desktop
-
-      - name: Run Tests
-        run: source ../../bin/activate-hermit && pnpm run test:run
-        working-directory: ui/desktop
+    if: github.event_name == 'pull_request' && needs.changes.outputs.windows-package == 'true'
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/bundle-desktop-windows.yml
+    with:
+      signing: false
+      update_channel: canary

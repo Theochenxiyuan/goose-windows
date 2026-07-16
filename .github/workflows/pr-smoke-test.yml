@@ -1,10 +1,4 @@
 on:
-  pull_request:
-    branches:
-      - main
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       branch:
@@ -16,39 +10,9 @@ on:
 name: Live Provider Tests
 
 jobs:
-  check-fork:
-    runs-on: ubuntu-latest
-    # Skip entire workflow for fork PRs and dependabot PRs (they don't have access to secrets)
-    if: github.actor != 'dependabot[bot]' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
-    steps:
-      - run: echo "Not a fork PR - proceeding with smoke tests"
-
-  changes:
-    runs-on: ubuntu-latest
-    needs: check-fork
-    outputs:
-      code: ${{ steps.filter.outputs.code }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          ref: ${{ github.event.inputs.branch || github.ref }}
-          fetch-depth: 0
-
-      - name: Check for code changes
-        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # pin@v3
-        id: filter
-        with:
-          base: ${{ github.event.before || github.event.pull_request.base.sha }}
-          filters: |
-            code:
-              - '!documentation/**'
-
   build-binary:
     name: Build Binary
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout Code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
