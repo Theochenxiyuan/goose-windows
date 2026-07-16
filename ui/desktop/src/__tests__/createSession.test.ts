@@ -73,10 +73,15 @@ describe('createSession ACP session extensions', () => {
     });
 
     expect(mockedGetConfiguredGooseExtensions).toHaveBeenCalledOnce();
-    expect(mockedCreateAcpSession).toHaveBeenCalledWith('/tmp', [gooseExtension('developer')], {
-      recipeDeeplink: undefined,
-      recipeId: undefined,
-    });
+    expect(mockedCreateAcpSession).toHaveBeenCalledWith(
+      '/tmp',
+      [gooseExtension('developer')],
+      {
+        recipeDeeplink: undefined,
+        recipeId: undefined,
+      },
+      undefined
+    );
   });
 
   it('falls back to enabled configured extensions when extension configs are empty', async () => {
@@ -86,10 +91,15 @@ describe('createSession ACP session extensions', () => {
     });
 
     expect(mockedGetConfiguredGooseExtensions).toHaveBeenCalledOnce();
-    expect(mockedCreateAcpSession).toHaveBeenCalledWith('/tmp', [gooseExtension('developer')], {
-      recipeDeeplink: undefined,
-      recipeId: undefined,
-    });
+    expect(mockedCreateAcpSession).toHaveBeenCalledWith(
+      '/tmp',
+      [gooseExtension('developer')],
+      {
+        recipeDeeplink: undefined,
+        recipeId: undefined,
+      },
+      undefined
+    );
   });
 
   it('omits ACP session extensions when no configured extensions are enabled', async () => {
@@ -98,9 +108,14 @@ describe('createSession ACP session extensions', () => {
     });
 
     expect(mockedGetConfiguredGooseExtensions).not.toHaveBeenCalled();
-    expect(mockedCreateAcpSession).toHaveBeenCalledWith('/tmp', [], {
-      recipeDeeplink: undefined,
-      recipeId: undefined,
-    });
+    expect(mockedCreateAcpSession).toHaveBeenCalledWith(
+      '/tmp',
+      [],
+      {
+        recipeDeeplink: undefined,
+        recipeId: undefined,
+      },
+      undefined
+    );
   });
 });
