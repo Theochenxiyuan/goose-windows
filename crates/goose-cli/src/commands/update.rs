@@ -367,6 +367,7 @@ fn extract_zip(data: &[u8], dest: &Path) -> Result<()> {
 }
 
 /// Validate that an archive entry path is safe (no absolute paths, no `..`).
+#[cfg(not(target_os = "windows"))]
 fn validate_entry_path(path: &Path) -> Result<()> {
     if path.is_absolute() {
         bail!("Tar entry has absolute path: {}", path.display());
@@ -813,6 +814,7 @@ mod tests {
     // Path validation and extraction hardening tests
     // -----------------------------------------------------------------------
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_validate_entry_path_accepts_safe_paths() {
         assert!(validate_entry_path(Path::new("goose")).is_ok());
@@ -820,6 +822,7 @@ mod tests {
         assert!(validate_entry_path(Path::new("subdir/nested/file.txt")).is_ok());
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_validate_entry_path_rejects_absolute() {
         let result = validate_entry_path(Path::new("/etc/malicious"));
@@ -827,6 +830,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("absolute path"));
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_validate_entry_path_rejects_traversal() {
         let result = validate_entry_path(Path::new("../../escape.txt"));
@@ -834,6 +838,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("path traversal"));
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_validate_entry_path_rejects_nested_traversal() {
         let result = validate_entry_path(Path::new("safe/../../escape"));
