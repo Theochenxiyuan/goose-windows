@@ -2512,6 +2512,21 @@ const registerGlobalShortcuts = () => {
 
 const openNativeWindowsLauncher = async (target: 'show' | 'settings') => {
   try {
+    const launcherPath = path.join(path.dirname(process.execPath), 'launcher', 'GooseLauncher.exe');
+    if (fsSync.existsSync(launcherPath)) {
+      const args = target === 'settings' ? ['--settings'] : [];
+      const child = spawn(launcherPath, args, {
+        detached: true,
+        stdio: 'ignore',
+      });
+      await new Promise<void>((resolve, reject) => {
+        child.once('spawn', resolve);
+        child.once('error', reject);
+      });
+      child.unref();
+      return;
+    }
+
     await shell.openExternal(`goosecompanion://${target}`);
   } catch (error) {
     log.error(`[WindowsLauncher] Could not open ${target}:`, formatErrorForLogging(error));
