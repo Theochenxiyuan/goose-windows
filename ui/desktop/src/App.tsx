@@ -31,6 +31,7 @@ interface PairRouteState {
   noAutoSubmit?: boolean;
   launcherSessionSelection?: LauncherSessionSelection;
   launcherRequestId?: string;
+  workingDir?: string;
 }
 
 interface ActiveSession {
@@ -112,6 +113,7 @@ const PairRouteWrapper = ({
   const noAutoSubmit = routeState.noAutoSubmit;
   const launcherSessionSelection = routeState.launcherSessionSelection;
   const launcherRequestId = routeState.launcherRequestId;
+  const workingDir = routeState.workingDir;
 
   // Create session if we have an initialMessage, recipeDeeplink, or recipeId but no sessionId
   useEffect(() => {
@@ -124,7 +126,7 @@ const PairRouteWrapper = ({
 
       (async () => {
         try {
-          const newSession = await createSession(getInitialWorkingDir(), {
+          const newSession = await createSession(workingDir ?? getInitialWorkingDir(), {
             recipeDeeplink: recipeDeeplinkFromConfig,
             recipeId: recipeIdFromConfig,
             allExtensions: extensionsList,
@@ -180,6 +182,7 @@ const PairRouteWrapper = ({
     extensionsList,
     launcherSessionSelection,
     launcherRequestId,
+    workingDir,
   ]);
 
   // Add resumed session to active sessions if not already there
@@ -584,6 +587,7 @@ export function AppInner() {
               noAutoSubmit?: boolean;
               launcherSessionSelection?: LauncherSessionSelection;
               launcherRequestId?: string;
+              workingDir?: string;
             }
           | undefined) || {};
 
@@ -595,6 +599,7 @@ export function AppInner() {
             noAutoSubmit: options.noAutoSubmit,
             launcherSessionSelection: options.launcherSessionSelection,
             launcherRequestId: options.launcherRequestId,
+            workingDir: options.workingDir,
           },
         });
         setTimeout(() => {

@@ -976,15 +976,20 @@ const appWindows = new Map<string, BrowserWindow>();
 const gooseServeLeases = new GooseServeLeaseRegistry(log);
 
 const windowPowerSaveBlockers = new Map<number, number>(); // windowId -> blockerId
-// Track pending initial messages per window
-const pendingInitialMessages = new Map<number, string>(); // windowId -> initialMessage
-const pendingInitialMessageNoAutoSubmit = new Set<number>(); // windowIds whose initialMessage should NOT auto-submit
-const pendingLauncherSessionSelections = new Map<number, LauncherSessionSelection>();
+interface PendingInitialMessage {
+  message: string;
+  noAutoSubmit?: boolean;
+  launcherSessionSelection?: LauncherSessionSelection;
+  launcherRequestId?: string;
+  workingDir?: string;
+}
+const pendingInitialMessages = new Map<number, PendingInitialMessage>();
 interface LauncherActivationWaiter {
   requestId: string;
   promise: Promise<void>;
   resolve: () => void;
   reject: (error: Error) => void;
+  closeWindowOnFailure: boolean;
   timeout?: ReturnType<typeof setTimeout>;
 }
 const pendingLauncherActivations = new Map<number, LauncherActivationWaiter>();
@@ -1007,14 +1012,17 @@ interface CreateChatOptions {
   launcherActivation?: LauncherActivationWaiter;
 }
 
-function createLauncherActivationWaiter(requestId: string): LauncherActivationWaiter {
+function createLauncherActivationWaiter(
+  requestId: string,
+  closeWindowOnFailure = true
+): LauncherActivationWaiter {
   let resolve!: () => void;
   let reject!: (error: Error) => void;
   const promise = new Promise<void>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
     reject = rejectPromise;
   });
-  return { requestId, promise, resolve, reject };
+  return { requestId, promise, resolve, reject, closeWindowOnFailure };
 }
 
 function takeLauncherActivation(windowId: number): LauncherActivationWaiter | undefined {
@@ -1023,6 +1031,57 @@ function takeLauncherActivation(windowId: number): LauncherActivationWaiter | un
   pendingLauncherActivations.delete(windowId);
   if (activation.timeout) clearTimeout(activation.timeout);
   return activation;
+}
+
+function registerLauncherActivation(
+  window: BrowserWindow,
+  activation: LauncherActivationWaiter
+): void {
+  pendingLauncherActivations.set(window.id, activation);
+  activation.timeout = setTimeout(() => {
+    const pending = takeLauncherActivation(window.id);
+    pending?.reject(
+      new DesktopActivationProtocolError(
+        'renderer_timeout',
+        'Goose timed out while handing the task to the session.'
+      )
+    );
+    if (pending?.closeWindowOnFailure && !window.isDestroyed()) window.close();
+  }, LAUNCHER_RENDERER_ACK_TIMEOUT_MS);
+}
+
+function deliverInitialMessage(window: BrowserWindow, message: PendingInitialMessage): void {
+  if (!reactReadyWindows.has(window.id) || window.webContents.isLoadingMainFrame()) {
+    pendingInitialMessages.set(window.id, message);
+    return;
+  }
+
+  window.webContents.send('set-initial-message', message.message, {
+    noAutoSubmit: message.noAutoSubmit,
+    launcherSessionSelection: message.launcherSessionSelection,
+    launcherRequestId: message.launcherRequestId,
+    workingDir: message.workingDir,
+  });
+}
+
+function findReusableLauncherWindow(): BrowserWindow | undefined {
+  const focusedWindow = BrowserWindow.getFocusedWindow();
+  if (
+    focusedWindow &&
+    windowMap.has(focusedWindow.id) &&
+    !focusedWindow.isDestroyed() &&
+    !pendingInitialMessages.has(focusedWindow.id) &&
+    !pendingLauncherActivations.has(focusedWindow.id)
+  ) {
+    return focusedWindow;
+  }
+
+  return [...windowMap.values()].find(
+    (window) =>
+      !window.isDestroyed() &&
+      !pendingInitialMessages.has(window.id) &&
+      !pendingLauncherActivations.has(window.id)
+  );
 }
 
 const createChat = async (
@@ -1427,17 +1486,7 @@ const createChat = async (
 
   const windowId = mainWindow.id;
   if (launcherActivation) {
-    pendingLauncherActivations.set(windowId, launcherActivation);
-    launcherActivation.timeout = setTimeout(() => {
-      const pending = takeLauncherActivation(windowId);
-      pending?.reject(
-        new DesktopActivationProtocolError(
-          'renderer_timeout',
-          'Goose timed out while handing the task to the session.'
-        )
-      );
-      if (!mainWindow.isDestroyed()) mainWindow.close();
-    }, LAUNCHER_RENDERER_ACK_TIMEOUT_MS);
+    registerLauncherActivation(mainWindow, launcherActivation);
   }
   const url = getAppUrl();
 
@@ -1485,13 +1534,13 @@ const createChat = async (
 
   // If we have an initial message, store it to send after React is ready
   if (initialMessage) {
-    pendingInitialMessages.set(mainWindow.id, initialMessage);
-    if (launcherSessionSelection) {
-      pendingLauncherSessionSelections.set(mainWindow.id, launcherSessionSelection);
-    }
-    if (initialMessageNoAutoSubmit) {
-      pendingInitialMessageNoAutoSubmit.add(mainWindow.id);
-    }
+    deliverInitialMessage(mainWindow, {
+      message: initialMessage,
+      noAutoSubmit: initialMessageNoAutoSubmit,
+      launcherSessionSelection,
+      launcherRequestId: launcherActivation?.requestId,
+      workingDir: dir,
+    });
   }
 
   // Set up local keyboard shortcuts that only work when the window is focused
@@ -1539,7 +1588,6 @@ const createChat = async (
     windowMap.delete(windowId);
 
     pendingInitialMessages.delete(windowId);
-    pendingLauncherSessionSelections.delete(windowId);
     pendingDeepLinks.delete(windowId);
     reactReadyWindows.delete(windowId);
     takeLauncherActivation(windowId)?.reject(
@@ -1915,18 +1963,9 @@ ipcMain.on('react-ready', (event) => {
   // Send any pending initial message for this window
   if (windowId && pendingInitialMessages.has(windowId)) {
     const initialMessage = pendingInitialMessages.get(windowId)!;
-    const noAutoSubmit = pendingInitialMessageNoAutoSubmit.has(windowId);
-    const launcherSessionSelection = pendingLauncherSessionSelections.get(windowId);
-    const launcherRequestId = pendingLauncherActivations.get(windowId)?.requestId;
     log.info('Sending pending initial message to window');
-    window.webContents.send('set-initial-message', initialMessage, {
-      noAutoSubmit,
-      launcherSessionSelection,
-      launcherRequestId,
-    });
     pendingInitialMessages.delete(windowId);
-    pendingInitialMessageNoAutoSubmit.delete(windowId);
-    pendingLauncherSessionSelections.delete(windowId);
+    deliverInitialMessage(window, initialMessage);
   }
 
   if (windowId && pendingDeepLinks.has(windowId) && window) {
@@ -1970,7 +2009,7 @@ ipcMain.on('launcher-activation-result', (event, result: unknown) => {
         : 'Goose could not submit the task to the requested session.'
     )
   );
-  if (!window.isDestroyed()) window.close();
+  if (activation.closeWindowOnFailure && !window.isDestroyed()) window.close();
 });
 
 ipcMain.handle('open-external', async (_event, url: string) => {
@@ -2594,6 +2633,22 @@ async function appMain() {
     const activationServer = new DesktopActivationServer({
       router: new DesktopActivationRouter(async (options) => {
         const { launcherRequestId, ...chatOptions } = options;
+        if (launcherRequestId && chatOptions.initialMessage) {
+          const existingWindow = findReusableLauncherWindow();
+          if (existingWindow) {
+            const activation = createLauncherActivationWaiter(launcherRequestId, false);
+            registerLauncherActivation(existingWindow, activation);
+            deliverInitialMessage(existingWindow, {
+              message: chatOptions.initialMessage,
+              noAutoSubmit: chatOptions.initialMessageNoAutoSubmit,
+              launcherSessionSelection: chatOptions.launcherSessionSelection,
+              launcherRequestId,
+              workingDir: chatOptions.dir,
+            });
+            return { window: existingWindow, activationAccepted: activation.promise };
+          }
+        }
+
         const activation = launcherRequestId
           ? createLauncherActivationWaiter(launcherRequestId)
           : undefined;

@@ -325,6 +325,32 @@ describe('App Component - Brand New State', () => {
     expect(reconnectAcpAfterSystemResume).toHaveBeenCalledOnce();
   });
 
+  it('routes a Launcher task to the requested working directory', async () => {
+    render(<AppInner />, { wrapper: AppInnerTestWrapper });
+
+    await waitFor(() => {
+      expect(mockElectron.reactReady).toHaveBeenCalled();
+    });
+
+    const setInitialMessageHandler = mockElectron.on.mock.calls.find(
+      ([channel]) => channel === 'set-initial-message'
+    )?.[1];
+    expect(setInitialMessageHandler).toBeDefined();
+
+    setInitialMessageHandler?.({} as any, 'Inspect this workspace', {
+      launcherRequestId: 'launcher-request',
+      workingDir: 'C:\\requested-workspace',
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith('/pair', {
+      state: expect.objectContaining({
+        initialMessage: { msg: 'Inspect this workspace', images: [] },
+        launcherRequestId: 'launcher-request',
+        workingDir: 'C:\\requested-workspace',
+      }),
+    });
+  });
+
   it('should seed recipe sessions with the recipe prompt when no initial message is provided', () => {
     expect(
       resolveSessionInitialMessage(
